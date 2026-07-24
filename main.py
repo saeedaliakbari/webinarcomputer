@@ -19,10 +19,6 @@ def get_db():
     return sqlite3.connect("bot_database.db")
 
 @client.event
-async def on_ready():
-    print(client.user, "آماده است")
-
-@client.event
 async def on_message(message: Message):
     user_id = message.from_user.id
     content = message.content or ""
@@ -106,7 +102,6 @@ async def finalize_ad(data):
 
     await client.send_message(ADMIN_ID, "✅ آگهی با موفقیت در کانال ثبت و ارسال شد.")
 
-@client.event
 
 async def handle_reminder_request(ad_id: int, user_id: int):
     conn = get_db()
@@ -224,7 +219,8 @@ async def is_user_member(user_id: int) -> bool:
         member = await client.get_chat_member(CHANNEL_ID, user_id)
         if member is None:
             return False
-        return member.is_member or member.is_admin or member.is_owner
+         # هر وضعیتی غیر از ترک‌کرده/اخراج‌شده یعنی عضو حساب میشه
+        return member.status not in ("left", "kicked")
     except BaleError:
         return False
     except Exception:
