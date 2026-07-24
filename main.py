@@ -102,7 +102,6 @@ async def finalize_ad(data):
 
     await client.send_message(ADMIN_ID, "✅ آگهی با موفقیت در کانال ثبت و ارسال شد.")
 
-
 async def handle_reminder_request(ad_id: int, user_id: int):
     conn = get_db()
     cursor = conn.cursor()
@@ -117,9 +116,10 @@ async def handle_reminder_request(ad_id: int, user_id: int):
 
     title, event_time_str = row
     event_time = datetime.strptime(event_time_str, "%Y-%m-%d %H:%M:%S")
+    now = datetime.now()
 
     # چک کن آیا زمان رویداد گذشته
-    if event_time <= datetime.now():
+    if event_time <= now:
         conn.close()
         event_time_display = event_time.strftime("%Y/%m/%d ساعت %H:%M")
         await client.send_message(
@@ -129,6 +129,38 @@ async def handle_reminder_request(ad_id: int, user_id: int):
         return
 
     remind_at = event_time - timedelta(minutes=30)
+    event_time_display = event_time.strftime("%Y/%m/%d ساعت %H:%M")
+
+    # حالت خاص: کمتر از ۳۰ دقیقه تا شروع رویداد مونده
+    if remind_at <= now:
+        minutes_left = int((event_time - now).total_seconds() // 60)
+
+        try:
+            cursor.execute(
+                "INSERT INTO reminders (ad_id, user_id, remind_at, sent) VALUES (?, ?, ?, 1)",
+                (ad_id, user_id, remind_at.strftime("%Y-%m-%d %H:%M:%S"))
+            )
+            conn.commit()
+            already_registered = False
+        except sqlite3.IntegrityError:
+            already_registered = True
+
+        conn.close()
+
+        if already_registered:
+            text = f"شما قبلاً برای رویداد «{title}» یادآوری ثبت کرده‌اید. ✅"
+        else:
+            text = (
+                f"⏰ توجه!\n\n"
+                f"📌 رویداد: {title}\n"
+                f"🕒 زمان برگزاری: {event_time_display}\n\n"
+                f"کمتر از {minutes_left} دقیقه به شروع این رویداد باقی مانده است."
+            )
+
+        await client.send_message(user_id, text)
+        return
+
+    # حالت عادی: بیشتر از ۳۰ دقیقه مونده
     remind_at_str = remind_at.strftime("%Y-%m-%d %H:%M:%S")
 
     try:
@@ -142,8 +174,6 @@ async def handle_reminder_request(ad_id: int, user_id: int):
         already_registered = True
 
     conn.close()
-
-    event_time_display = event_time.strftime("%Y/%m/%d ساعت %H:%M")
 
     if already_registered:
         text = f"شما قبلاً برای رویداد «{title}» یادآوری ثبت کرده‌اید. ✅"
