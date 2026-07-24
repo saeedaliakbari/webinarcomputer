@@ -1,6 +1,6 @@
 from balepy import Client, filters
 
-bot = Client("MyBot", "436404259:IKbRkyrzMrYt2WSPg-K-yLYeq4U-TooquEs")
+bot = Client("MyBot", os.environ["BOT_TOKEN"])
 
 @bot.on_message(filters.command("start"))
 async def start_handler(message):
