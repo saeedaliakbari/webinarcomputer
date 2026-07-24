@@ -64,14 +64,28 @@ async def on_message(message: Message):
             state["step"] = "datetime"
             await message.reply("تاریخ و ساعت رویداد رو بفرست (فرمت: 1404-05-10 18:00):")
 
-        elif state["step"] == "datetime":
+        elif state["step"] == "date":
             try:
-                jalali_dt = jdatetime.datetime.strptime(message.content, "%Y-%m-%d %H:%M")
+                # فقط برای اعتبارسنجی فرمت تاریخ پارس می‌کنیم
+                jdatetime.datetime.strptime(message.content, "%Y/%m/%d")
+            except ValueError:
+                await message.reply("فرمت تاریخ اشتباهه. دوباره امتحان کن (مثال: 1404/05/10):")
+                return
+
+            state["data"]["date_str"] = message.content
+            state["step"] = "time"
+            await message.reply("ساعت رویداد رو بفرست (فرمت: 18:00):")
+
+        elif state["step"] == "time":
+            try:
+                # ترکیب تاریخ ذخیره‌شده با ساعت جدید و پارس کامل
+                full_str = f"{state['data']['date_str']} {message.content}"
+                jalali_dt = jdatetime.datetime.strptime(full_str, "%Y/%m/%d %H:%M")
                 gregorian_dt = jalali_dt.togregorian()
             except ValueError:
-                await message.reply("فرمت تاریخ اشتباهه. دوباره امتحان کن (مثال: 1404-05-10 18:00):")
-                return  # از state خارج نمیشه، دوباره همین مرحله رو تلاش می‌کنه
-
+                await message.reply("فرمت ساعت اشتباهه. دوباره امتحان کن (مثال: 18:00):")
+                return
+            
             state["data"]["event_time"] = gregorian_dt.strftime("%Y-%m-%d %H:%M:%S")
             await finalize_ad(state["data"])
             del admin_states[user_id]
