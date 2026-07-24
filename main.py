@@ -5,6 +5,7 @@ import asyncio
 from datetime import datetime, timedelta
 from bale import Bot, Message, InlineKeyboardMarkup, InlineKeyboardButton
 from bale.error import BaleError
+from bale import Bot, Message, InlineKeyboardMarkup, InlineKeyboardButton, InputFile
 
 client = Bot(token=os.environ["BOT_TOKEN"])
 CHANNEL_USERNAME = "testnotif"
@@ -82,16 +83,59 @@ async def on_message(message: Message):
                 full_str = f"{state['data']['date_str']} {message.content}"
                 jalali_dt = jdatetime.datetime.strptime(full_str, "%Y/%m/%d %H:%M")
                 gregorian_dt = jalali_dt.togregorian()
+                state["data"]["event_time"] = gregorian_dt.strftime("%Y-%m-%d %H:%M:%S")
+                state["step"] = "banner"
+                await message.reply("اگه بنر داری بفرست، وگرنه بنویس /skip")
             except ValueError:
                 await message.reply("فرمت ساعت اشتباهه. دوباره امتحان کن (مثال: 18:00):")
                 return
-            
-            state["data"]["event_time"] = gregorian_dt.strftime("%Y-%m-%d %H:%M:%S")
+        elif state["step"] == "banner":
+            if message.content == "/skip":
+                state["data"]["photo_file_id"] = None
+            elif message.photos:
+                # بزرگ‌ترین سایز عکس (آخرین آیتم لیست معمولاً بزرگترینه)
+                largest_photo = message.photos[-1]
+                state["data"]["photo_file_id"] = largest_photo.file_id
+            else:
+                await message.reply("لطفاً یک عکس بفرست یا برای رد کردن بنویس /skip")
+                return
+
             await finalize_ad(state["data"])
             del admin_states[user_id]
 
 async def finalize_ad(data):
-    # ذخیره در دیتابیس
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO ads (title, description, event_time, photo_file_id) VALUES (?, ?, ?, ?)",
+        (data["title"], data["description"], data["event_time"], data.get("photo_file_id"))
+    )
+    ad_id = cursor.lastrowid
+    conn.commit()
+
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton(
+        text="یادآوری بگیر 🔔",
+        url=f"https://ble.ir/{BOT_USERNAME}?start=remind_{ad_id}"
+    ))
+
+    jalali_display = to_jalali_display(data["event_time"])
+    text = f"📢 {data['title']}\n\n{data['description']}\n\n🕒 زمان: {jalali_display}"
+
+    if data.get("photo_file_id"):
+        photo = InputFile(data["photo_file_id"])
+        sent_message = await client.send_photo(CHANNEL_ID, photo, caption=text, components=markup)
+    else:
+        sent_message = await client.send_message(CHANNEL_ID, text, components=markup)
+
+    cursor.execute(
+        "UPDATE ads SET channel_message_id = ? WHERE id = ?",
+        (sent_message.message_id, ad_id)
+    )
+    conn.commit()
+    conn.close()
+
+    await client.send_message(ADMIN_ID, "✅ آگهی با موفقیت در کانال ثبت و ارسال شد.")    # ذخیره در دیتابیس
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute(
