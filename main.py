@@ -14,6 +14,10 @@ CHANNEL_ID = 6191660398
 
 # state هر ادمین: در چه مرحله‌ای از ثبت آگهی هست
 admin_states = {}
+def to_jalali_display(gregorian_str: str) -> str:
+    gregorian_dt = datetime.strptime(gregorian_str, "%Y-%m-%d %H:%M:%S")
+    jalali_dt = jdatetime.datetime.fromgregorian(datetime=gregorian_dt)
+    return jalali_dt.strftime("%Y/%m/%d - %H:%M")
 
 def get_db():
     return sqlite3.connect("bot_database.db")
@@ -89,8 +93,8 @@ async def finalize_ad(data):
     text="یادآوری بگیر 🔔",
     url=f"https://ble.ir/{BOT_USERNAME}?start=remind_{ad_id}"
     ))
-
-    text = f"📢 {data['title']}\n\n{data['description']}\n\n🕒 زمان: {data['event_time']}"
+    
+    text = f"📢 {data['title']}\n\n{data['description']}\n\n🕒 زمان: {to_jalali_display(data["event_time"])}"
     sent_message = await client.send_message(CHANNEL_ID, text, components=markup)
 
     # ذخیره message_id برای استفاده احتمالی بعدی
@@ -123,7 +127,7 @@ async def handle_reminder_request(ad_id: int, user_id: int):
     # چک کن آیا زمان رویداد گذشته
     if event_time <= now:
         conn.close()
-        event_time_display = event_time.strftime("%Y/%m/%d ساعت %H:%M")
+        event_time_display = to_jalali_display(event_time_str)
         await client.send_message(
             user_id,
             f"⛔ زمان رویداد «{title}» ({event_time_display}) گذشته است و امکان ثبت یادآوری برای آن وجود ندارد."
@@ -131,7 +135,7 @@ async def handle_reminder_request(ad_id: int, user_id: int):
         return
 
     remind_at = event_time - timedelta(minutes=30)
-    event_time_display = event_time.strftime("%Y/%m/%d ساعت %H:%M")
+    event_time_display = to_jalali_display(event_time_str)
 
     # حالت خاص: کمتر از ۳۰ دقیقه تا شروع رویداد مونده
     if remind_at <= now:
@@ -274,4 +278,6 @@ async def send_join_required(user_id: int, pending_action: str):
         components=markup
     )
 
+
 client.run()
+
