@@ -27,6 +27,7 @@ async def on_message(message: Message):
         # جدا کردن payload از /start
         parts = content.split(" ", 1)
         payload = parts[1] if len(parts) > 1 else "none"
+        print("DEBUG - content:", repr(content), "| payload:", repr(payload))
 
         if not await is_user_member(user_id):
             await send_join_required(user_id, payload)
@@ -103,6 +104,7 @@ async def finalize_ad(data):
     await client.send_message(ADMIN_ID, "✅ آگهی با موفقیت در کانال ثبت و ارسال شد.")
 
 async def handle_reminder_request(ad_id: int, user_id: int):
+    print("DEBUG - looking up ad_id:", ad_id)
     conn = get_db()
     cursor = conn.cursor()
 
