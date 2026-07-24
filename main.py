@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import jdatetime
+import asyncio
 from datetime import datetime, timedelta
 from bale import Bot, Message, InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -114,6 +115,17 @@ async def handle_reminder_request(ad_id: int, user_id: int):
 
     title, event_time_str = row
     event_time = datetime.strptime(event_time_str, "%Y-%m-%d %H:%M:%S")
+
+    # چک کن آیا زمان رویداد گذشته
+    if event_time <= datetime.now():
+        conn.close()
+        event_time_display = event_time.strftime("%Y/%m/%d ساعت %H:%M")
+        await client.send_message(
+            user_id,
+            f"⛔ زمان رویداد «{title}» ({event_time_display}) گذشته است و امکان ثبت یادآوری برای آن وجود ندارد."
+        )
+        return
+
     remind_at = event_time - timedelta(minutes=30)
     remind_at_str = remind_at.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -142,7 +154,8 @@ async def handle_reminder_request(ad_id: int, user_id: int):
         )
 
     await client.send_message(user_id, text)
-import asyncio
+
+
 
 async def reminder_loop():
     while True:
