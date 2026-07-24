@@ -61,8 +61,8 @@ async def on_message(message: Message):
 
         elif state["step"] == "description":
             state["data"]["description"] = message.content
-            state["step"] = "datetime"
-            await message.reply("تاریخ و ساعت رویداد رو بفرست (فرمت: 1404-05-10 18:00):")
+            state["step"] = "date"
+            await message.reply("تاریخ رویداد رو بفرست (فرمت: 1404/05/10):")
 
         elif state["step"] == "date":
             try:
