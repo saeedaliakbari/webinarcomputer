@@ -6,6 +6,7 @@ from bale import Bot, Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 client = Bot(token=os.environ["BOT_TOKEN"])
 
+BOT_USERNAME = "webinarcomputerbot"
 ADMIN_ID = 1924418661
 CHANNEL_ID = 6191660398
 
@@ -22,6 +23,13 @@ async def on_ready():
 @client.event
 async def on_message(message: Message):
     user_id = message.from_user.id
+    content = message.content or ""
+
+    # مدیریت لینک عمیق یادآوری - قبل از چک ادمین بودن!
+    if content.startswith("/start remind_"):
+        ad_id = int(content.split("remind_")[1])
+        await handle_reminder_request(ad_id, user_id)
+        return
 
     # فقط ادمین اجازه ثبت آگهی داره
     if user_id != ADMIN_ID:
@@ -72,7 +80,10 @@ async def finalize_ad(data):
 
     # ساخت دکمه و ارسال به کانال
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton(text="یادآوری کن 🔔", callback_data=f"remind_{ad_id}"))
+    markup.add(InlineKeyboardButton(
+    text="یادآوری بگیر 🔔",
+    url=f"https://ble.ir/{BOT_USERNAME}?start=remind_{ad_id}"
+    ))
 
     text = f"📢 {data['title']}\n\n{data['description']}\n\n🕒 زمان: {data['event_time']}"
     sent_message = await client.send_message(CHANNEL_ID, text, components=markup)
@@ -89,31 +100,23 @@ async def finalize_ad(data):
 
 @client.event
 
-async def on_callback(callback_query):
-    data = callback_query.data
-    
-    if not data.startswith("remind_"):
-        return
-    
-    ad_id = int(data.split("_")[1])
-    user_id = callback_query.from_user.id
-    
+async def handle_reminder_request(ad_id: int, user_id: int):
     conn = get_db()
     cursor = conn.cursor()
-    
-    # گرفتن زمان رویداد از دیتابیس
-    cursor.execute("SELECT event_time FROM ads WHERE id = ?", (ad_id,))
+
+    cursor.execute("SELECT title, event_time FROM ads WHERE id = ?", (ad_id,))
     row = cursor.fetchone()
-    
+
     if row is None:
         conn.close()
+        await client.send_message(user_id, "این آگهی دیگر معتبر نیست.")
         return
-    
-    event_time_str = row[0]
+
+    title, event_time_str = row
     event_time = datetime.strptime(event_time_str, "%Y-%m-%d %H:%M:%S")
     remind_at = event_time - timedelta(minutes=30)
     remind_at_str = remind_at.strftime("%Y-%m-%d %H:%M:%S")
-    
+
     try:
         cursor.execute(
             "INSERT INTO reminders (ad_id, user_id, remind_at) VALUES (?, ?, ?)",
@@ -122,21 +125,23 @@ async def on_callback(callback_query):
         conn.commit()
         already_registered = False
     except sqlite3.IntegrityError:
-        # کاربر قبلاً برای همین آگهی ثبت کرده (به خاطر UNIQUE constraint)
         already_registered = True
-    
+
     conn.close()
-    
-    try:
-        if already_registered:
-            await client.send_message(user_id, "شما قبلاً برای این آگهی یادآوری ثبت کرده‌اید. ✅")
-        else:
-            await client.send_message(user_id, f"یادآوری شما ثبت شد ✅\nنیم ساعت قبل از رویداد به شما اطلاع می‌دهیم.")
-    except Exception as e:
-        print(f"خطا در ارسال پیام به {user_id}: {e}")
-        # این یعنی کاربر هنوز ربات رو استارت نکرده
 
+    event_time_display = event_time.strftime("%Y/%m/%d ساعت %H:%M")
 
+    if already_registered:
+        text = f"شما قبلاً برای رویداد «{title}» یادآوری ثبت کرده‌اید. ✅"
+    else:
+        text = (
+            f"✅ یادآوری شما با موفقیت ثبت شد!\n\n"
+            f"📌 رویداد: {title}\n"
+            f"🕒 زمان برگزاری: {event_time_display}\n\n"
+            f"نیم ساعت قبل از شروع، پیامی از طرف ربات دریافت خواهید کرد."
+        )
+
+    await client.send_message(user_id, text)
 import asyncio
 
 async def reminder_loop():
@@ -159,7 +164,7 @@ async def reminder_loop():
             try:
                 await client.send_message(
                     user_id,
-                    f"⏰ یادآوری: نیم ساعت دیگر رویداد «{ad_title}» شروع می‌شود."
+                   f"⏰ یادآوری رویداد!\n\n📌 «{ad_title}»\n\nنیم ساعت دیگر این رویداد آغاز می‌شود."
                 )
                 cursor.execute("UPDATE reminders SET sent = 1 WHERE id = ?", (reminder_id,))
                 conn.commit()
