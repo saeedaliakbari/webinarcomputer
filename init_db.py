@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS ads (
     description TEXT NOT NULL,
     event_time TEXT NOT NULL,
     channel_message_id TEXT,
+    photo_file_id TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 )
 """)

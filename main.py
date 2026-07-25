@@ -59,6 +59,9 @@ async def on_ready():
 # ---------- پیام‌ها ----------
 @client.event
 async def on_message(message: Message):
+    if message.from_user is None:
+        return
+    
     user_id = message.from_user.id
     content = (message.content or "").strip()
 
