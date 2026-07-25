@@ -28,6 +28,11 @@ BTN_NEW_AD = "➕ ثبت آگهی جدید"
 BTN_LIST_ADS = "📋 لیست آگهی‌ها"
 BTN_HELP = "ℹ️ راهنما"
 SKIP_TEXT = "⏭ رد کردن (بدون بنر)"
+BTN_PROFILE = "👤 پروفایل من"
+BTN_MY_REMINDERS = "🔔 یادآوری‌های من"
+BTN_PAST_EVENTS = "📅 رویدادهای گذشته"
+
+
 
 def build_skip_menu():
     markup = MenuKeyboardMarkup()
@@ -42,9 +47,11 @@ def build_admin_menu():
 
 def build_user_menu():
     markup = MenuKeyboardMarkup()
-    markup.add(MenuKeyboardButton(text=BTN_HELP), row=1)
+    markup.add(MenuKeyboardButton(text=BTN_PROFILE), row=1)
+    markup.add(MenuKeyboardButton(text=BTN_MY_REMINDERS), row=1)
+    markup.add(MenuKeyboardButton(text=BTN_PAST_EVENTS), row=2)
+    markup.add(MenuKeyboardButton(text=BTN_HELP), row=2)
     return markup
-
 
 def get_db():
     return sqlite3.connect(DB_PATH)
@@ -54,6 +61,22 @@ def to_jalali_display(gregorian_str: str) -> str:
     jalali_dt = jdatetime.datetime.fromgregorian(datetime=gregorian_dt)
     return jalali_dt.strftime("%Y/%m/%d - %H:%M")
 
+def format_remaining(event_time: datetime) -> str:
+    diff = event_time - datetime.now()
+    total_seconds = int(diff.total_seconds())
+    if total_seconds <= 0:
+        return "به زودی"
+    days, rem = divmod(total_seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, _ = divmod(rem, 60)
+    parts = []
+    if days:
+        parts.append(f"{days} روز")
+    if hours:
+        parts.append(f"{hours} ساعت")
+    if minutes and not days:
+        parts.append(f"{minutes} دقیقه")
+    return " و ".join(parts) + " مانده" if parts else "کمتر از یک دقیقه مانده"
 
 # ---------- ready ----------
 @client.event
@@ -70,7 +93,7 @@ async def on_message(message: Message):
     
     user_id = message.from_user.id
     content = (message.content or "").strip()
-    print(f"DEBUG on_message: user_id={user_id}, content={content!r}, has_photos={bool(message.photos)}", flush=True)
+    # print(f"DEBUG on_message: user_id={user_id}, content={content!r}, has_photos={bool(message.photos)}", flush=True)
     # ---- شروع (کاربر یا ادمین) ----
     if content.startswith("/start"):
         parts = content.split(" ", 1)
@@ -89,6 +112,18 @@ async def on_message(message: Message):
         return
 
     # ---- دکمه راهنما برای کاربر عادی ----
+    if content == BTN_PROFILE:
+        await send_profile(message)
+        return
+
+    if content == BTN_MY_REMINDERS:
+        await send_my_reminders(user_id)
+        return
+
+    if content == BTN_PAST_EVENTS:
+        await send_past_events(user_id)
+        return
+
     if content == BTN_HELP:
         await message.reply("این ربات برای دریافت یادآوری رویدادهای کانال است. کافیست روی دکمه یادآوری زیر هر آگهی در کانال بزنید.")
         return
@@ -115,7 +150,7 @@ async def on_message(message: Message):
 async def handle_admin_conversation(message: Message, state: dict):
     user_id = message.from_user.id
     content = (message.content or "").strip()
-    print(f"DEBUG handle_admin_conversation: mode={state.get('mode')}, step={state.get('step')}, content={content!r}", flush=True)
+    # print(f"DEBUG handle_admin_conversation: mode={state.get('mode')}, step={state.get('step')}, content={content!r}", flush=True)
     mode = state["mode"]
 
     # ===================== ثبت آگهی جدید =====================
@@ -218,7 +253,7 @@ async def handle_admin_conversation(message: Message, state: dict):
 
 # ---------- ثبت نهایی آگهی جدید ----------
 async def finalize_ad(data):
-    print(f"DEBUG finalize_ad called with data={data}", flush=True)
+    # print(f"DEBUG finalize_ad called with data={data}", flush=True)
     try:
         conn = get_db()
         cursor = conn.cursor()
@@ -327,6 +362,43 @@ async def on_callback(callback_query):
         else:
             await client.send_message(user_id, "هنوز عضو کانال نشده‌اید. لطفاً ابتدا عضو شوید.")
         return
+
+    # ---- لغو یک یادآوری ----
+    if data.startswith("cancelrem|"):
+        reminder_id = int(data.split("|")[1])
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM reminders WHERE id = ? AND user_id = ?", (reminder_id, user_id))
+        conn.commit()
+        conn.close()
+        await client.send_message(user_id, "یادآوری لغو شد ✅")
+        return
+
+    # ---- لغو همه یادآوری‌ها ----
+    if data == "cancelallrem":
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton(text="بله، لغو کن", callback_data="cancelallrem_confirm"))
+        markup.add(InlineKeyboardButton(text="انصراف", callback_data="cancelallrem_cancel"))
+        await client.send_message(user_id, "آیا مطمئن هستید می‌خواهید همه‌ی یادآوری‌های فعال را لغو کنید؟", components=markup)
+        return
+
+    if data == "cancelallrem_confirm":
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            "DELETE FROM reminders WHERE user_id = ? AND ad_id IN (SELECT id FROM ads WHERE event_time > ?)",
+            (user_id, now_str)
+        )
+        conn.commit()
+        conn.close()
+        await client.send_message(user_id, "همه‌ی یادآوری‌های فعال شما لغو شد ✅")
+        return
+
+    if data == "cancelallrem_cancel":
+        await client.send_message(user_id, "لغو انجام نشد.")
+        return
+
 
     if user_id != ADMIN_ID:
         return  # فقط ادمین اجازه مدیریت آگهی داره
@@ -522,6 +594,79 @@ async def send_join_required(user_id: int, pending_action: str):
         components=markup
     )
 
+async def send_profile(message: Message):
+    user = message.from_user
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT COUNT(*) FROM reminders r JOIN ads a ON r.ad_id = a.id "
+        "WHERE r.user_id = ? AND a.event_time > ?",
+        (user.id, now_str)
+    )
+    active_count = cursor.fetchone()[0]
+    conn.close()
+
+    username_display = f"@{user.username}" if user.username else "ندارد"
+    text = (
+        f"👤 پروفایل شما\n\n"
+        f"🆔 شناسه عددی: {user.id}\n"
+        f"نام کاربری: {username_display}\n"
+        f"نام: {user.first_name}\n\n"
+        f"🔔 تعداد یادآوری‌های فعال: {active_count}"
+    )
+    await message.reply(text)
+
+async def send_my_reminders(user_id: int):
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT r.id, a.title, a.event_time FROM reminders r JOIN ads a ON r.ad_id = a.id "
+        "WHERE r.user_id = ? AND a.event_time > ? ORDER BY a.event_time ASC",
+        (user_id, now_str)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        await client.send_message(user_id, "شما در حال حاضر یادآوری فعالی ندارید.")
+        return
+
+    for reminder_id, title, event_time_str in rows:
+        event_time = datetime.strptime(event_time_str, "%Y-%m-%d %H:%M:%S")
+        remaining = format_remaining(event_time)
+        jalali_display = to_jalali_display(event_time_str)
+
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton(text="❌ لغو یادآوری", callback_data=f"cancelrem|{reminder_id}"))
+
+        text = f"📌 {title}\n🕒 {jalali_display}\n⏳ {remaining}"
+        await client.send_message(user_id, text, components=markup)
+
+    markup_all = InlineKeyboardMarkup()
+    markup_all.add(InlineKeyboardButton(text="🔕 لغو همه یادآوری‌ها", callback_data="cancelallrem"))
+    await client.send_message(user_id, "برای لغو همه‌ی یادآوری‌ها:", components=markup_all)
+
+async def send_past_events(user_id: int):
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT a.title, a.event_time FROM reminders r JOIN ads a ON r.ad_id = a.id "
+        "WHERE r.user_id = ? AND a.event_time <= ? ORDER BY a.event_time DESC LIMIT 25",
+        (user_id, now_str)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        await client.send_message(user_id, "شما رویداد گذشته‌ای ندارید.")
+        return
+
+    lines = [f"📌 {title} — {to_jalali_display(event_time_str)}" for title, event_time_str in rows]
+    text = "📅 رویدادهای گذشته‌ی شما:\n\n" + "\n".join(lines)
+    await client.send_message(user_id, text)
 
 client.run()
