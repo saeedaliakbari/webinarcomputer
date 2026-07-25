@@ -161,6 +161,7 @@ async def handle_admin_conversation(message: Message, state: dict):
                 await message.reply("لطفاً یک عکس بفرست یا از دکمه رد کردن استفاده کن:", components=build_skip_menu())
                 return
 
+            await finalize_ad(state["data"])  # ← این خط برگردونده شد
             await client.send_message(user_id, "بازگشت به منو:", components=build_admin_menu())
             del admin_states[user_id]
 
