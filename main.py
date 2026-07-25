@@ -70,7 +70,7 @@ async def on_message(message: Message):
     
     user_id = message.from_user.id
     content = (message.content or "").strip()
-
+    print(f"DEBUG on_message: user_id={user_id}, content={content!r}, has_photos={bool(message.photos)}", flush=True)
     # ---- شروع (کاربر یا ادمین) ----
     if content.startswith("/start"):
         parts = content.split(" ", 1)
@@ -115,6 +115,7 @@ async def on_message(message: Message):
 async def handle_admin_conversation(message: Message, state: dict):
     user_id = message.from_user.id
     content = (message.content or "").strip()
+    print(f"DEBUG handle_admin_conversation: mode={state.get('mode')}, step={state.get('step')}, content={content!r}", flush=True)
     mode = state["mode"]
 
     # ===================== ثبت آگهی جدید =====================
@@ -216,6 +217,7 @@ async def handle_admin_conversation(message: Message, state: dict):
 
 # ---------- ثبت نهایی آگهی جدید ----------
 async def finalize_ad(data):
+    print(f"DEBUG finalize_ad called with data={data}", flush=True)
     try:
         conn = get_db()
         cursor = conn.cursor()
