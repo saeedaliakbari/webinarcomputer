@@ -21,6 +21,12 @@ admin_states = {}
 BTN_NEW_AD = "➕ ثبت آگهی جدید"
 BTN_LIST_ADS = "📋 لیست آگهی‌ها"
 BTN_HELP = "ℹ️ راهنما"
+SKIP_TEXT = "⏭ رد کردن (بدون بنر)"
+
+def build_skip_menu():
+    markup = MenuKeyboardMarkup()
+    markup.add(MenuKeyboardButton(text=SKIP_TEXT), row=1)
+    return markup
 
 def build_admin_menu():
     markup = MenuKeyboardMarkup()
@@ -134,18 +140,18 @@ async def handle_admin_conversation(message: Message, state: dict):
                 return
             state["data"]["event_time"] = gregorian_dt.strftime("%Y-%m-%d %H:%M:%S")
             state["step"] = "banner"
-            await message.reply("اگه بنر داری بفرست، وگرنه بنویس /skip")
+            await message.reply("اگه بنر داری بفرست، یا از دکمه زیر رد کن:", components=build_skip_menu())
 
         elif state["step"] == "banner":
-            if content == "/skip":
+             if content == SKIP_TEXT or content == "/skip":
                 state["data"]["photo_file_id"] = None
             elif message.photos:
                 state["data"]["photo_file_id"] = message.photos[-1].file_id
             else:
-                await message.reply("لطفاً یک عکس بفرست یا برای رد کردن بنویس /skip")
+                await message.reply("لطفاً یک عکس بفرست یا از دکمه رد کردن استفاده کن:", components=build_skip_menu())
                 return
 
-            await finalize_ad(state["data"])
+            await client.send_message(user_id, "بازگشت به منو:", components=build_admin_menu())
             del admin_states[user_id]
 
     # ===================== ویرایش یک فیلد آگهی =====================
@@ -187,12 +193,12 @@ async def handle_admin_conversation(message: Message, state: dict):
             del admin_states[user_id]
 
         elif field == "banner":
-            if content == "/skip":
+            if content == SKIP_TEXT or content == "/skip":
                 new_photo_id = None
             elif message.photos:
                 new_photo_id = message.photos[-1].file_id
             else:
-                await message.reply("لطفاً یک عکس بفرست یا برای حذف بنر بنویس /skip")
+                await message.reply("لطفاً یک عکس بفرست یا از دکمه رد کردن استفاده کن:", components=build_skip_menu())
                 return
             await update_ad_field(ad_id, "photo_file_id", new_photo_id)
             await message.reply("بنر با موفقیت به‌روزرسانی شد ✅", components=build_admin_menu())
@@ -325,11 +331,14 @@ async def on_callback(callback_query):
         ad_id = int(ad_id_str)
         admin_states[user_id] = {"mode": "editfield", "field": field, "ad_id": ad_id}
 
+        if field == "banner":
+            await client.send_message(user_id, "بنر جدید را بفرستید، یا از دکمه زیر رد کنید:", components=build_skip_menu())
+            return
+
         prompts = {
             "title": "عنوان جدید را بفرستید:",
             "description": "توضیحات جدید را بفرستید:",
             "date": "تاریخ جدید را بفرستید (فرمت: 1404/05/10):",
-            "banner": "بنر جدید را بفرستید، یا برای حذف بنر بنویسید /skip"
         }
         await client.send_message(user_id, prompts[field])
         return
@@ -497,6 +506,7 @@ async def send_join_required(user_id: int, pending_action: str):
         "برای استفاده از ربات، ابتدا باید عضو کانال شوید. پس از عضویت، روی دکمه «بررسی مجدد» بزنید.",
         components=markup
     )
+
 
 
 client.run()
