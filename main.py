@@ -936,7 +936,7 @@ async def submit_pending_event(user_id: int, data: dict):
 async def send_pending_events(admin_user_id: int):
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, title, submitted_by FROM pending_events ORDER BY id ASC")
+    cursor.execute("SELECT id, title, description, photo_file_id, submitted_by FROM pending_events ORDER BY id ASC")
     rows = cursor.fetchall()
     conn.close()
 
@@ -944,15 +944,51 @@ async def send_pending_events(admin_user_id: int):
         await client.send_message(admin_user_id, "هیچ رویداد در انتظار تاییدی وجود ندارد.")
         return
 
-    for pid, title, submitted_by in rows:
+    for pid, title, description, photo_file_id, submitted_by in rows:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT session_time FROM pending_event_sessions WHERE pending_event_id = ? ORDER BY session_time ASC",
+            (pid,)
+        )
+        sessions = [r[0] for r in cursor.fetchall()]
+        conn.close()
+
+        # گرفتن یوزرنیم/نام ثبت‌کننده
+        try:
+            submitter = await client.get_user(submitted_by)
+            username_display = f"@{submitter.username}" if submitter.username else "ندارد"
+            name_display = submitter.first_name
+        except Exception:
+            username_display = "نامشخص"
+            name_display = "نامشخص"
+
+        numerals = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+        session_lines = []
+        for idx, session_time in enumerate(sessions):
+            display = to_jalali_display(session_time)
+            emoji = numerals[idx] if idx < len(numerals) else f"{idx+1}."
+            session_lines.append(f"{emoji} {display}")
+        sessions_text = "\n".join(session_lines) if session_lines else "بدون جلسه ثبت‌شده"
+
+        text = (
+            f"📌 {title}\n\n"
+            f"{description}\n\n"
+            f"🕒 جلسات:\n{sessions_text}\n\n"
+            f"👤 ثبت‌کننده: {name_display}\n"
+            f"🆔 شناسه: {submitted_by}\n"
+            f"یوزرنیم: {username_display}"
+        )
+
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton(text="✅ تایید و انتشار", callback_data=f"pendapprove|{pid}"), row=1)
         markup.add(InlineKeyboardButton(text="❌ رد کردن", callback_data=f"pendreject|{pid}"), row=2)
-        await client.send_message(
-            admin_user_id,
-            f"📌 {title}\n👤 ثبت‌کننده: {submitted_by}",
-            components=markup
-        )
+
+        if photo_file_id:
+            photo = InputFile(photo_file_id)
+            await client.send_photo(admin_user_id, photo, caption=text, components=markup)
+        else:
+            await client.send_message(admin_user_id, text, components=markup)
 
 
 async def approve_pending_event(pending_id: int):
