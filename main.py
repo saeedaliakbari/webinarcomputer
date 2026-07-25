@@ -8,6 +8,12 @@ from bale import (
     MenuKeyboardMarkup, MenuKeyboardButton, InputFile
 )
 from bale.error import BaleError
+import os
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_DIR = os.path.join(BASE_DIR, "db")
+os.makedirs(DB_DIR, exist_ok=True)
+DB_PATH = os.path.join(DB_DIR, "bot_database.db")
 
 client = Bot(token=os.environ["BOT_TOKEN"])
 CHANNEL_USERNAME = "testnotif"
@@ -41,7 +47,7 @@ def build_user_menu():
 
 
 def get_db():
-    return sqlite3.connect("db/bot_database.db")
+    return sqlite3.connect(DB_PATH)
 
 def to_jalali_display(gregorian_str: str) -> str:
     gregorian_dt = datetime.strptime(gregorian_str, "%Y-%m-%d %H:%M:%S")
@@ -210,19 +216,22 @@ async def handle_admin_conversation(message: Message, state: dict):
 
 # ---------- ثبت نهایی آگهی جدید ----------
 async def finalize_ad(data):
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO ads (title, description, event_time, photo_file_id) VALUES (?, ?, ?, ?)",
-        (data["title"], data["description"], data["event_time"], data.get("photo_file_id"))
-    )
-    ad_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO ads (title, description, event_time, photo_file_id) VALUES (?, ?, ?, ?)",
+            (data["title"], data["description"], data["event_time"], data.get("photo_file_id"))
+        )
+        ad_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
 
-    await post_ad_to_channel(ad_id)
-    await client.send_message(ADMIN_ID, "✅ آگهی با موفقیت در کانال ثبت و ارسال شد.", components=build_admin_menu())
-
+        await post_ad_to_channel(ad_id)
+        await client.send_message(ADMIN_ID, "✅ آگهی با موفقیت در کانال ثبت و ارسال شد.", components=build_admin_menu())
+    except Exception as e:
+        print("FINALIZE_AD ERROR:", type(e), e, flush=True)
+        await client.send_message(ADMIN_ID, f"خطا در ثبت آگهی: {e}")
 
 # ---------- ارسال/بازارسال آگهی به کانال ----------
 async def post_ad_to_channel(ad_id: int):
