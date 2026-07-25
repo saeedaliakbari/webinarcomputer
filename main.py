@@ -41,7 +41,7 @@ def build_user_menu():
 
 
 def get_db():
-    return sqlite3.connect("bot_database.db")
+    return sqlite3.connect("db/bot_database.db")
 
 def to_jalali_display(gregorian_str: str) -> str:
     gregorian_dt = datetime.strptime(gregorian_str, "%Y-%m-%d %H:%M:%S")
