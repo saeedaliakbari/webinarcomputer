@@ -143,7 +143,7 @@ async def handle_admin_conversation(message: Message, state: dict):
             await message.reply("اگه بنر داری بفرست، یا از دکمه زیر رد کن:", components=build_skip_menu())
 
         elif state["step"] == "banner":
-             if content == SKIP_TEXT or content == "/skip":
+            if content == SKIP_TEXT or content == "/skip":
                 state["data"]["photo_file_id"] = None
             elif message.photos:
                 state["data"]["photo_file_id"] = message.photos[-1].file_id
