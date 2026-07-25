@@ -10,10 +10,12 @@ from bale import (
 from bale.error import BaleError
 
 client = Bot(token=os.environ["BOT_TOKEN"])
-CHANNEL_USERNAME = "testnotif"
 BOT_USERNAME = "webinarcomputerbot"
 ADMIN_ID = 1924418661
-CHANNEL_ID = 6191660398
+# CHANNEL_USERNAME = "testnotif"
+# CHANNEL_ID = 6191660398
+CHANNEL_USERNAME = "computer_webinar"
+CHANNEL_ID = 4863203707
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_DIR = os.path.join(BASE_DIR, "db")
