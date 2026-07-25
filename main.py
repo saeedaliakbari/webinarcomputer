@@ -20,7 +20,7 @@ CHANNEL_USERNAME = "testnotif"
 BOT_USERNAME = "webinarcomputerbot"
 ADMIN_ID = 1924418661
 CHANNEL_ID = 6191660398
-
+ADMIN_PANEL_COMMAND = "مدیریت"
 admin_states = {}
 
 # ---------- منوها ----------
@@ -99,9 +99,9 @@ async def on_message(message: Message):
         parts = content.split(" ", 1)
         payload = parts[1] if len(parts) > 1 else "none"
 
-        if user_id == ADMIN_ID:
-            await message.reply("سلام ادمین 👋 خوش آمدید.", components=build_admin_menu())
-            return
+        # if user_id == ADMIN_ID:
+        #     await message.reply("سلام ادمین 👋 خوش آمدید.", components=build_admin_menu())
+        #     return
 
         if not await is_user_member(user_id):
             await send_join_required(user_id, payload)
@@ -110,7 +110,10 @@ async def on_message(message: Message):
         await handle_start_payload(user_id, payload)
         await message.reply("از منوی زیر استفاده کنید:", components=build_user_menu())
         return
-
+    # ---- ورود ادمین به پنل مدیریت ----
+    if content == ADMIN_PANEL_COMMAND and user_id == ADMIN_ID:
+        await message.reply("🔧 وارد پنل مدیریت شدید.", components=build_admin_menu())
+        return
     # ---- دکمه راهنما برای کاربر عادی ----
     if content == BTN_PROFILE:
         await send_profile(message)
