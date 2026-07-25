@@ -3,31 +3,42 @@ import sqlite3
 conn = sqlite3.connect("db/bot_database.db")
 cursor = conn.cursor()
 
+cursor.execute("DROP TABLE IF EXISTS reminders")
+cursor.execute("DROP TABLE IF EXISTS ad_sessions")
+cursor.execute("DROP TABLE IF EXISTS ads")
+
 cursor.execute("""
-CREATE TABLE IF NOT EXISTS ads (
+CREATE TABLE ads (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
     description TEXT NOT NULL,
-    event_time TEXT NOT NULL,
-    channel_message_id TEXT,
     photo_file_id TEXT,
+    channel_message_id TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 )
 """)
 
 cursor.execute("""
-CREATE TABLE IF NOT EXISTS reminders (
+CREATE TABLE ad_sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ad_id INTEGER NOT NULL,
+    session_time TEXT NOT NULL,
+    FOREIGN KEY(ad_id) REFERENCES ads(id)
+)
+""")
+
+cursor.execute("""
+CREATE TABLE reminders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL,
     user_id INTEGER NOT NULL,
     remind_at TEXT NOT NULL,
     sent INTEGER DEFAULT 0,
-    UNIQUE(ad_id, user_id),
-    FOREIGN KEY(ad_id) REFERENCES ads(id)
+    UNIQUE(session_id, user_id),
+    FOREIGN KEY(session_id) REFERENCES ad_sessions(id)
 )
 """)
 
 conn.commit()
 conn.close()
-
-print("دیتابیس و جدول‌ها با موفقیت ساخته شدند.")
+print("دیتابیس بازسازی شد.")
