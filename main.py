@@ -31,7 +31,7 @@ SKIP_TEXT = "⏭ رد کردن (بدون بنر)"
 BTN_PROFILE = "👤 پروفایل من"
 BTN_MY_REMINDERS = "🔔 یادآوری‌های من"
 BTN_PAST_EVENTS = "📅 رویدادهای گذشته"
-
+BTN_BACK_TO_USER_MENU = "🔙 بازگشت به منوی کاربری"
 
 
 def build_skip_menu():
@@ -43,6 +43,7 @@ def build_admin_menu():
     markup = MenuKeyboardMarkup()
     markup.add(MenuKeyboardButton(text=BTN_NEW_AD), row=1)
     markup.add(MenuKeyboardButton(text=BTN_LIST_ADS), row=1)
+    markup.add(MenuKeyboardButton(text=BTN_BACK_TO_USER_MENU), row=2)
     return markup
 
 def build_user_menu():
@@ -134,7 +135,9 @@ async def on_message(message: Message):
     # ---- از اینجا به بعد فقط ادمین ----
     if user_id != ADMIN_ID:
         return
-
+    if content == BTN_BACK_TO_USER_MENU:
+        await message.reply("بازگشت به منوی کاربری:", components=build_user_menu())
+        return
     # دکمه‌های منوی ادمین
     if content == BTN_NEW_AD:
         admin_states[user_id] = {"mode": "newad", "step": "title", "data": {}}
