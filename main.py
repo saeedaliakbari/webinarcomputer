@@ -368,12 +368,14 @@ async def post_ad_to_channel(ad_id: int):
 
     session_lines = []
     markup = InlineKeyboardMarkup()
+    row_num = 1
 
     if len(sessions) > 1:
         markup.add(InlineKeyboardButton(
             text="🔔 یادآوری همه جلسات",
             url=f"https://ble.ir/{BOT_USERNAME}?start=remind_all_{ad_id}"
-        ))
+        ),row=row_num)
+        row_num+=1
 
     numerals = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
     for idx, (session_id, session_time) in enumerate(sessions):
@@ -385,7 +387,8 @@ async def post_ad_to_channel(ad_id: int):
         markup.add(InlineKeyboardButton(
             text=label,
             url=f"https://ble.ir/{BOT_USERNAME}?start=remind_sess_{session_id}"
-        ))
+        ),row=row_num)
+        row_num+=1
 
     sessions_text = "\n".join(session_lines)
     text = f"📢 {title}\n\n{description}\n\n🕒 جلسات:\n{sessions_text}"
