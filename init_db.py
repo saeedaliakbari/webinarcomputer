@@ -3,9 +3,9 @@ import sqlite3
 conn = sqlite3.connect("db/bot_database.db")
 cursor = conn.cursor()
 
-cursor.execute("DROP TABLE IF EXISTS reminders")
-cursor.execute("DROP TABLE IF EXISTS ad_sessions")
-cursor.execute("DROP TABLE IF EXISTS ads")
+# cursor.execute("DROP TABLE IF EXISTS reminders")
+# cursor.execute("DROP TABLE IF EXISTS ad_sessions")
+# cursor.execute("DROP TABLE IF EXISTS ads")
 
 cursor.execute("""
 CREATE TABLE ads (
@@ -36,6 +36,26 @@ CREATE TABLE reminders (
     sent INTEGER DEFAULT 0,
     UNIQUE(session_id, user_id),
     FOREIGN KEY(session_id) REFERENCES ad_sessions(id)
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS pending_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    submitted_by INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    photo_file_id TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS pending_event_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pending_event_id INTEGER NOT NULL,
+    session_time TEXT NOT NULL,
+    FOREIGN KEY(pending_event_id) REFERENCES pending_events(id)
 )
 """)
 

@@ -36,13 +36,15 @@ SKIP_TEXT = "⏭ رد کردن (بدون بنر)"
 BTN_ADD_SESSION = "➕ افزودن جلسه دیگر"
 BTN_FINISH_SESSIONS = "✅ پایان و ثبت آگهی"
 ADMIN_PANEL_COMMAND = "مدیریت"
-
+BTN_SUBMIT_EVENT = "📝 ثبت رویداد"
+BTN_PENDING_EVENTS = "📥 درخواست‌های رویداد"
 
 def build_admin_menu():
     markup = MenuKeyboardMarkup()
     markup.add(MenuKeyboardButton(text=BTN_NEW_AD), row=1)
     markup.add(MenuKeyboardButton(text=BTN_LIST_ADS), row=1)
-    markup.add(MenuKeyboardButton(text=BTN_BACK_TO_USER_MENU), row=2)
+    markup.add(MenuKeyboardButton(text=BTN_PENDING_EVENTS), row=2)
+    markup.add(MenuKeyboardButton(text=BTN_BACK_TO_USER_MENU), row=3)
     return markup
 
 def build_user_menu():
@@ -50,7 +52,8 @@ def build_user_menu():
     markup.add(MenuKeyboardButton(text=BTN_PROFILE), row=1)
     markup.add(MenuKeyboardButton(text=BTN_MY_REMINDERS), row=1)
     markup.add(MenuKeyboardButton(text=BTN_PAST_EVENTS), row=2)
-    markup.add(MenuKeyboardButton(text=BTN_HELP), row=2)
+    markup.add(MenuKeyboardButton(text=BTN_SUBMIT_EVENT), row=2)
+    markup.add(MenuKeyboardButton(text=BTN_HELP), row=3)
     return markup
 
 def build_skip_menu():
@@ -126,11 +129,9 @@ async def on_message(message: Message):
     if content.startswith("/start"):
         parts = content.split(" ", 1)
         payload = parts[1] if len(parts) > 1 else "none"
-
         if not await is_user_member(user_id):
             await send_join_required(user_id, payload)
             return
-
         await handle_start_payload(user_id, payload)
         await message.reply("از منوی زیر استفاده کنید:", components=build_user_menu())
         return
@@ -138,6 +139,17 @@ async def on_message(message: Message):
     # ---- ورود ادمین به پنل مدیریت ----
     if content == ADMIN_PANEL_COMMAND and user_id == ADMIN_ID:
         await message.reply("🔧 وارد پنل مدیریت شدید.", components=build_admin_menu())
+        return
+
+    # ---- ادامه‌ی مکالمه‌ی جاری (چه ادمین چه کاربر عادی) ----
+    if user_id in admin_states:
+        await handle_admin_conversation(message, admin_states[user_id])
+        return
+
+    # ---- دکمه ثبت رویداد (کاربر عادی) ----
+    if content == BTN_SUBMIT_EVENT:
+        admin_states[user_id] = {"mode": "submitevent", "step": "title", "data": {"sessions": []}}
+        await message.reply("عنوان رویداد پیشنهادی رو بفرست:")
         return
 
     # ---- دکمه‌های منوی کاربر ----
@@ -161,19 +173,16 @@ async def on_message(message: Message):
     if content == BTN_BACK_TO_USER_MENU:
         await message.reply("بازگشت به منوی کاربری:", components=build_user_menu())
         return
-
     if content == BTN_NEW_AD:
         admin_states[user_id] = {"mode": "newad", "step": "title", "data": {"sessions": []}}
         await message.reply("عنوان رویداد رو بفرست:")
         return
-
     if content == BTN_LIST_ADS:
         await send_ads_list(user_id)
         return
-
-    if user_id in admin_states:
-        await handle_admin_conversation(message, admin_states[user_id])
-
+    if content == BTN_PENDING_EVENTS:
+        await send_pending_events(user_id)
+        return
 
 async def handle_admin_conversation(message: Message, state: dict):
     user_id = message.from_user.id
@@ -313,8 +322,75 @@ async def handle_admin_conversation(message: Message, state: dict):
             await update_ad_field(ad_id, "photo_file_id", new_photo_id)
             await message.reply("بنر با موفقیت به‌روزرسانی شد ✅", components=build_admin_menu())
             del admin_states[user_id]
+    # ===================== تایید اگهی=====================
+    elif mode == "submitevent":
+        step = state["step"]
 
+        if step == "title":
+            state["data"]["title"] = content
+            state["step"] = "description"
+            await message.reply("توضیحات رویداد رو بفرست:")
 
+        elif step == "description":
+            state["data"]["description"] = content
+            state["step"] = "session_date"
+            await message.reply(f"تاریخ جلسه {len(state['data']['sessions']) + 1} رو بفرست (فرمت: 14050503):")
+
+        elif step == "session_date":
+            try:
+                jalali_date = parse_jalali_date(content)
+            except ValueError:
+                await message.reply("فرمت تاریخ اشتباهه. دوباره امتحان کن (مثال: 14050503):")
+                return
+            state["_pending_date"] = jalali_date
+            state["step"] = "session_time"
+            await message.reply("ساعت این جلسه رو بفرست (فرمت: 1730):")
+
+        elif step == "session_time":
+            try:
+                hour, minute = parse_time(content)
+                jalali_date = state["_pending_date"]
+                jalali_dt = jdatetime.datetime(jalali_date.year, jalali_date.month, jalali_date.day, hour, minute)
+                gregorian_dt = jalali_dt.togregorian()
+            except ValueError:
+                await message.reply("فرمت ساعت اشتباهه. دوباره امتحان کن (مثال: 1730):")
+                return
+
+            state["data"]["sessions"].append(gregorian_dt.strftime("%Y-%m-%d %H:%M:%S"))
+            state["step"] = "session_decision"
+            await message.reply(
+                f"جلسه {len(state['data']['sessions'])} ثبت شد ✅\nاگه جلسه دیگه‌ای داری اضافه کن، وگرنه پایان بده:",
+                components=build_session_decision_menu()
+            )
+
+        elif step == "session_decision":
+            if content == BTN_ADD_SESSION:
+                state["step"] = "session_date"
+                await message.reply(f"تاریخ جلسه {len(state['data']['sessions']) + 1} رو بفرست (فرمت: 14050503):")
+            elif content == BTN_FINISH_SESSIONS:
+                state["step"] = "banner"
+                await message.reply("اگه بنر داری بفرست، یا از دکمه زیر رد کن:", components=build_skip_menu())
+            else:
+                await message.reply("لطفاً از دکمه‌های زیر استفاده کن:", components=build_session_decision_menu())
+
+        elif step == "banner":
+            if content == SKIP_TEXT or content == "/skip":
+                state["data"]["photo_file_id"] = None
+            elif message.photos:
+                state["data"]["photo_file_id"] = message.photos[-1].file_id
+            else:
+                await message.reply("لطفاً یک عکس بفرست یا از دکمه رد کردن استفاده کن:", components=build_skip_menu())
+                return
+
+            await submit_pending_event(user_id, state["data"])
+            await client.send_message(user_id, "بازگشت به منو:", components=build_user_menu())
+            del admin_states[user_id]
+
+    # ===================== رد کردن با دلیل (ادمین) =====================
+    elif mode == "rejectreason":
+        await reject_pending_event(state["pending_id"], content)
+        await message.reply("رویداد رد شد و به کاربر اطلاع داده شد.", components=build_admin_menu())
+        del admin_states[user_id]
 # ================= ثبت نهایی آگهی جدید =================
 async def finalize_ad(data):
     conn = get_db()
@@ -574,6 +650,18 @@ async def on_callback(callback_query):
         await client.send_message(user_id, "حذف لغو شد.")
         return
 
+    if data.startswith("pendapprove|"):
+        pending_id = int(data.split("|")[1])
+        await approve_pending_event(pending_id)
+        await client.send_message(user_id, "رویداد تایید و منتشر شد ✅")
+        return
+
+    if data.startswith("pendreject|"):
+        pending_id = int(data.split("|")[1])
+        admin_states[user_id] = {"mode": "rejectreason", "pending_id": pending_id}
+        await client.send_message(user_id, "دلیل رد کردن رو بنویس (یا برای رد بدون دلیل بنویس /skip):")
+        return
+
 
 # ================= یادآوری‌ها (بر پایه جلسه) =================
 async def register_session_reminder(session_id: int, user_id: int):
@@ -825,5 +913,95 @@ async def send_join_required(user_id: int, pending_action: str):
         components=markup
     )
 
+async def submit_pending_event(user_id: int, data: dict):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO pending_events (submitted_by, title, description, photo_file_id) VALUES (?, ?, ?, ?)",
+        (user_id, data["title"], data["description"], data.get("photo_file_id"))
+    )
+    pending_id = cursor.lastrowid
+    for session_time in data["sessions"]:
+        cursor.execute(
+            "INSERT INTO pending_event_sessions (pending_event_id, session_time) VALUES (?, ?)",
+            (pending_id, session_time)
+        )
+    conn.commit()
+    conn.close()
+
+    await client.send_message(user_id, "✅ رویداد شما ثبت شد و برای بررسی مدیر ارسال گردید.")
+    await client.send_message(ADMIN_ID, f"📥 یک رویداد جدید در انتظار تایید است.\nبرای بررسی، از منوی «{BTN_PENDING_EVENTS}» استفاده کنید.")
+
+
+async def send_pending_events(admin_user_id: int):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, title, submitted_by FROM pending_events ORDER BY id ASC")
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        await client.send_message(admin_user_id, "هیچ رویداد در انتظار تاییدی وجود ندارد.")
+        return
+
+    for pid, title, submitted_by in rows:
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton(text="✅ تایید و انتشار", callback_data=f"pendapprove|{pid}"), row=1)
+        markup.add(InlineKeyboardButton(text="❌ رد کردن", callback_data=f"pendreject|{pid}"), row=2)
+        await client.send_message(
+            admin_user_id,
+            f"📌 {title}\n👤 ثبت‌کننده: {submitted_by}",
+            components=markup
+        )
+
+
+async def approve_pending_event(pending_id: int):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT submitted_by, title, description, photo_file_id FROM pending_events WHERE id = ?", (pending_id,))
+    row = cursor.fetchone()
+    if row is None:
+        conn.close()
+        return None
+
+    submitted_by, title, description, photo_file_id = row
+    cursor.execute("SELECT session_time FROM pending_event_sessions WHERE pending_event_id = ?", (pending_id,))
+    sessions = [r[0] for r in cursor.fetchall()]
+
+    cursor.execute(
+        "INSERT INTO ads (title, description, photo_file_id) VALUES (?, ?, ?)",
+        (title, description, photo_file_id)
+    )
+    ad_id = cursor.lastrowid
+    for session_time in sessions:
+        cursor.execute("INSERT INTO ad_sessions (ad_id, session_time) VALUES (?, ?)", (ad_id, session_time))
+
+    cursor.execute("DELETE FROM pending_event_sessions WHERE pending_event_id = ?", (pending_id,))
+    cursor.execute("DELETE FROM pending_events WHERE id = ?", (pending_id,))
+    conn.commit()
+    conn.close()
+
+    await post_ad_to_channel(ad_id)
+    await client.send_message(submitted_by, f"✅ رویداد پیشنهادی شما «{title}» تایید و در کانال منتشر شد.")
+    return ad_id
+
+
+async def reject_pending_event(pending_id: int, reason: str):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT submitted_by, title FROM pending_events WHERE id = ?", (pending_id,))
+    row = cursor.fetchone()
+    if row is None:
+        conn.close()
+        return
+
+    submitted_by, title = row
+    cursor.execute("DELETE FROM pending_event_sessions WHERE pending_event_id = ?", (pending_id,))
+    cursor.execute("DELETE FROM pending_events WHERE id = ?", (pending_id,))
+    conn.commit()
+    conn.close()
+
+    reason_text = f"\nدلیل: {reason}" if reason and reason != "/skip" else ""
+    await client.send_message(submitted_by, f"❌ رویداد پیشنهادی شما «{title}» رد شد.{reason_text}")
 
 client.run()
