@@ -72,9 +72,6 @@ def build_session_decision_menu():
 def get_db():
     return sqlite3.connect(DB_PATH)
 
-def build_channel_post_link(message_id) -> str:
-    return f"https://ble.ir/{CHANNEL_USERNAME}/{message_id}"
-
 def to_jalali_display(gregorian_str: str) -> str:
     gregorian_dt = datetime.strptime(gregorian_str, "%Y-%m-%d %H:%M:%S")
     jalali_dt = jdatetime.datetime.fromgregorian(datetime=gregorian_dt)
@@ -488,8 +485,6 @@ async def post_ad_to_channel(ad_id: int):
         sent_message = await client.send_photo(CHANNEL_ID, photo, caption=text, components=markup)
     else:
         sent_message = await client.send_message(CHANNEL_ID, text, components=markup)
-    print("FULL DICT:", sent_message.to_dict())
-    print(sent_message.to_dict(), flush=True)
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute("UPDATE ads SET channel_message_id = ? WHERE id = ?", (sent_message.message_id, ad_id))
@@ -532,7 +527,7 @@ async def send_ads_list(user_id: int, page: int = 0):
     total = cursor.fetchone()[0]
 
     cursor.execute(
-        "SELECT id, title, channel_message_id FROM ads ORDER BY id DESC LIMIT ? OFFSET ?",
+        "SELECT id, title FROM ads ORDER BY id DESC LIMIT ? OFFSET ?",
         (PAGE_SIZE, page * PAGE_SIZE)
     )
     ads = cursor.fetchall()
@@ -542,12 +537,11 @@ async def send_ads_list(user_id: int, page: int = 0):
         await client.send_message(user_id, "هیچ آگهی‌ای در این صفحه وجود ندارد." if page > 0 else "هنوز هیچ آگهی‌ای ثبت نشده است.")
         return
 
-    for ad_id, title, channel_message_id in ads:
+    for ad_id, title in ads:
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton(text="✏️ ویرایش", callback_data=f"editad|{ad_id}"), row=1)
         markup.add(InlineKeyboardButton(text="🗑 حذف", callback_data=f"delad|{ad_id}"), row=2)
-        if channel_message_id:
-            markup.add(InlineKeyboardButton(text="👁 مشاهده در کانال", url=build_channel_post_link(channel_message_id)), row=3)
+        markup.add(InlineKeyboardButton(text="👁 مشاهده آگهی", callback_data=f"viewad|{ad_id}"), row=3)
         await client.send_message(user_id, f"📌 {title}", components=markup)
 
     has_next = (page + 1) * PAGE_SIZE < total
@@ -618,6 +612,11 @@ async def on_callback(callback_query):
 
     if data == "cancelallrem_cancel":
         await client.send_message(user_id, "لغو انجام نشد.")
+        return
+
+    if data.startswith("viewad|"):
+        ad_id = int(data.split("|")[1])
+        await show_ad_details(user_id, ad_id)
         return
 
     # ---- از اینجا فقط ادمین ----
@@ -887,7 +886,7 @@ async def send_my_reminders(user_id: int, page: int = 0):
     total = cursor.fetchone()[0]
 
     cursor.execute(
-        "SELECT r.id, ads.title, s.session_time, ads.channel_message_id FROM reminders r "
+        "SELECT r.id, ads.id, ads.title, s.session_time FROM reminders r "
         "JOIN ad_sessions s ON r.session_id = s.id "
         "JOIN ads ON s.ad_id = ads.id "
         "WHERE r.user_id = ? AND s.session_time > ? ORDER BY s.session_time ASC LIMIT ? OFFSET ?",
@@ -900,15 +899,14 @@ async def send_my_reminders(user_id: int, page: int = 0):
         await client.send_message(user_id, "یادآوری‌ای در این صفحه وجود ندارد." if page > 0 else "شما در حال حاضر یادآوری فعالی ندارید.")
         return
 
-    for reminder_id, title, session_time_str, channel_message_id in rows:
+    for reminder_id, ad_id, title, session_time_str in rows:
         session_time = datetime.strptime(session_time_str, "%Y-%m-%d %H:%M:%S")
         remaining = format_remaining(session_time)
         display = to_jalali_display(session_time_str)
 
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton(text="❌ لغو یادآوری", callback_data=f"cancelrem|{reminder_id}"), row=1)
-        if channel_message_id:
-            markup.add(InlineKeyboardButton(text="👁 مشاهده آگهی رویداد", url=build_channel_post_link(channel_message_id)), row=2)
+        markup.add(InlineKeyboardButton(text="👁 مشاهده آگهی رویداد", callback_data=f"viewad|{ad_id}"), row=2)
 
         text = f"📌 {title}\n🕒 {display}\n⏳ {remaining}"
         await client.send_message(user_id, text, components=markup)
@@ -1122,4 +1120,38 @@ async def notify_admins(text: str):
             await client.send_message(admin_id, text)
         except Exception as e:
             print(f"خطا در ارسال پیام به ادمین {admin_id}: {e}")
+
+async def show_ad_details(user_id: int, ad_id: int):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT title, description, photo_file_id FROM ads WHERE id = ?", (ad_id,))
+    row = cursor.fetchone()
+    if row is None:
+        conn.close()
+        await client.send_message(user_id, "این آگهی دیگر موجود نیست.")
+        return
+
+    title, description, photo_file_id = row
+    cursor.execute("SELECT session_time FROM ad_sessions WHERE ad_id = ? ORDER BY session_time ASC", (ad_id,))
+    sessions = [r[0] for r in cursor.fetchall()]
+    conn.close()
+
+    numerals = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+    session_lines = []
+    for idx, session_time in enumerate(sessions):
+        display = to_jalali_display(session_time)
+        emoji = numerals[idx] if idx < len(numerals) else f"{idx+1}."
+        session_lines.append(f"{emoji} {display}")
+    sessions_text = "\n".join(session_lines) if session_lines else "بدون جلسه"
+
+    text = f"📢 {title}\n\n{description}\n\n🕒 جلسات:\n{sessions_text}"
+
+    if photo_file_id:
+        photo = InputFile(photo_file_id)
+        await client.send_photo(user_id, photo, caption=text)
+    else:
+        await client.send_message(user_id, text)
+
+
+
 client.run()
