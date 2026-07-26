@@ -515,7 +515,7 @@ async def update_ad_field(ad_id: int, field: str, value):
 async def send_ads_list(user_id: int):
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, title FROM ads ORDER BY id DESC")
+    cursor.execute("SELECT id, title, channel_message_id FROM ads ORDER BY id DESC")
     ads = cursor.fetchall()
     conn.close()
 
