@@ -41,6 +41,7 @@ BTN_SUBMIT_EVENT = "📝 ثبت رویداد"
 BTN_PENDING_EVENTS = "📥 درخواست‌های رویداد"
 BTN_SEND_FEEDBACK = "💬 ارسال نظر و پیشنهاد"
 BTN_FEEDBACKS = "📩 نظرات کاربران"
+BTN_STATS = "📊 آمار ربات"
 
 def build_admin_menu():
     markup = MenuKeyboardMarkup()
@@ -48,6 +49,7 @@ def build_admin_menu():
     markup.add(MenuKeyboardButton(text=BTN_LIST_ADS), row=1)
     markup.add(MenuKeyboardButton(text=BTN_PENDING_EVENTS), row=2)
     markup.add(MenuKeyboardButton(text=BTN_FEEDBACKS), row=2)
+    markup.add(MenuKeyboardButton(text=BTN_STATS), row=3)
     markup.add(MenuKeyboardButton(text=BTN_BACK_TO_USER_MENU), row=3)
     return markup
 
@@ -138,6 +140,7 @@ async def on_message(message: Message):
 
     user_id = message.from_user.id
     content = (message.content or "").strip()
+    await upsert_user(message.from_user)
 
     # ---- شروع ----
     if content.startswith("/start"):
@@ -203,7 +206,10 @@ async def on_message(message: Message):
     if content == BTN_FEEDBACKS:
         await send_feedbacks(user_id)
         return
-    
+    if content == BTN_STATS:
+        await send_stats(user_id)
+        return
+
 async def handle_admin_conversation(message: Message, state: dict):
     user_id = message.from_user.id
     content = (message.content or "").strip()
@@ -1245,5 +1251,78 @@ async def send_feedbacks(admin_user_id: int, page: int = 0):
     if nav_markup:
         await client.send_message(admin_user_id, f"صفحه {page + 1}", components=nav_markup)
 
+async def upsert_user(user):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO users (user_id, first_name, username) VALUES (?, ?, ?) "
+        "ON CONFLICT(user_id) DO UPDATE SET first_name = excluded.first_name, username = excluded.username",
+        (user.id, user.first_name, user.username)
+    )
+    conn.commit()
+    conn.close()
+
+async def send_stats(admin_user_id: int):
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_db()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT COUNT(*) FROM users")
+    total_users = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM ads")
+    total_ads = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM ad_sessions WHERE session_time > ?", (now_str,))
+    upcoming_sessions = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM pending_events")
+    pending_count = cursor.fetchone()[0]
+
+    cursor.execute(
+        "SELECT COUNT(*) FROM reminders r JOIN ad_sessions s ON r.session_id = s.id WHERE s.session_time > ?",
+        (now_str,)
+    )
+    active_reminders = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM reminders")
+    total_reminders_ever = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(DISTINCT user_id) FROM reminders")
+    unique_reminder_users = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM feedbacks")
+    total_feedbacks = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM feedbacks WHERE replied = 0")
+    pending_feedbacks = cursor.fetchone()[0]
+
+    cursor.execute(
+        "SELECT ads.title, COUNT(r.id) as cnt FROM reminders r "
+        "JOIN ad_sessions s ON r.session_id = s.id "
+        "JOIN ads ON s.ad_id = ads.id "
+        "GROUP BY ads.id ORDER BY cnt DESC LIMIT 1"
+    )
+    top_ad = cursor.fetchone()
+
+    conn.close()
+
+    text = (
+        f"📊 آمار ربات\n\n"
+        f"👥 تعداد کل کاربران: {total_users}\n"
+        f"👤 کاربرانی که حداقل یک یادآوری ثبت کرده‌اند: {unique_reminder_users}\n\n"
+        f"📢 تعداد کل آگهی‌ها: {total_ads}\n"
+        f"🕒 جلسات آینده (هنوز برگزار نشده): {upcoming_sessions}\n"
+        f"📥 رویدادهای در انتظار تایید: {pending_count}\n\n"
+        f"🔔 یادآوری‌های فعال (آینده): {active_reminders}\n"
+        f"🔔 مجموع یادآوری‌های ثبت‌شده تا الان: {total_reminders_ever}\n\n"
+        f"💬 مجموع نظرات دریافتی: {total_feedbacks}\n"
+        f"🕓 نظرات بدون پاسخ: {pending_feedbacks}\n"
+    )
+
+    if top_ad:
+        text += f"\n🏆 پربازدیدترین آگهی: «{top_ad[0]}» ({top_ad[1]} یادآوری)"
+
+    await client.send_message(admin_user_id, text)
 
 client.run()

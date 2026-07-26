@@ -2,15 +2,13 @@ import sqlite3
 conn = sqlite3.connect("db/bot_database.db")
 cursor = conn.cursor()
 cursor.execute("""
-CREATE TABLE IF NOT EXISTS feedbacks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    message TEXT NOT NULL,
-    reply TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    replied INTEGER DEFAULT 0
+CREATE TABLE IF NOT EXISTS users (
+    user_id INTEGER PRIMARY KEY,
+    first_name TEXT,
+    username TEXT,
+    first_seen TEXT DEFAULT CURRENT_TIMESTAMP
 )
 """)
 conn.commit()
 conn.close()
-print("جدول feedbacks اضافه شد.")
+print("جدول users اضافه شد.")
