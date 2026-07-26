@@ -11,7 +11,7 @@ from bale.error import BaleError
 
 client = Bot(token=os.environ["BOT_TOKEN"])
 BOT_USERNAME = "webinarcomputerbot"
-ADMIN_ID = 1924418661
+ADMIN_IDS  = [1924418661,64032077]
 # CHANNEL_USERNAME = "testnotif"
 # CHANNEL_ID = 6191660398
 CHANNEL_USERNAME = "computer_webinar"
@@ -70,6 +70,9 @@ def build_session_decision_menu():
 
 def get_db():
     return sqlite3.connect(DB_PATH)
+
+def build_channel_post_link(message_id) -> str:
+    return f"https://ble.ir/{CHANNEL_USERNAME}/{message_id}"
 
 def to_jalali_display(gregorian_str: str) -> str:
     gregorian_dt = datetime.strptime(gregorian_str, "%Y-%m-%d %H:%M:%S")
@@ -137,7 +140,7 @@ async def on_message(message: Message):
         return
 
     # ---- ورود ادمین به پنل مدیریت ----
-    if content == ADMIN_PANEL_COMMAND and user_id == ADMIN_ID:
+    if content == ADMIN_PANEL_COMMAND and user_id in ADMIN_IDS:
         await message.reply("🔧 وارد پنل مدیریت شدید.", components=build_admin_menu())
         return
 
@@ -167,7 +170,7 @@ async def on_message(message: Message):
         return
 
     # ---- از اینجا فقط ادمین ----
-    if user_id != ADMIN_ID:
+    if user_id not in ADMIN_IDS:
         return
 
     if content == BTN_BACK_TO_USER_MENU:
@@ -411,8 +414,7 @@ async def finalize_ad(data):
     conn.close()
 
     await post_ad_to_channel(ad_id)
-    await client.send_message(ADMIN_ID, "✅ آگهی با موفقیت در کانال ثبت و ارسال شد.")
-
+    await notify_admins("✅ آگهی با موفقیت در کانال ثبت و ارسال شد.")
 
 async def replace_ad_sessions(ad_id: int, sessions: list):
     conn = get_db()
@@ -521,10 +523,12 @@ async def send_ads_list(user_id: int):
         await client.send_message(user_id, "هنوز هیچ آگهی‌ای ثبت نشده است.")
         return
 
-    for ad_id, title in ads:
+    for ad_id, title, channel_message_id  in ads:
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton(text="✏️ ویرایش", callback_data=f"editad|{ad_id}"))
         markup.add(InlineKeyboardButton(text="🗑 حذف", callback_data=f"delad|{ad_id}"))
+        if channel_message_id:
+            markup.add(InlineKeyboardButton(text="👁 مشاهده در کانال", url=build_channel_post_link(channel_message_id)), row=3)
         await client.send_message(user_id, f"📌 {title}", components=markup)
 
 
@@ -579,7 +583,7 @@ async def on_callback(callback_query):
         return
 
     # ---- از اینجا فقط ادمین ----
-    if user_id != ADMIN_ID:
+    if user_id not in ADMIN_IDS:
         return
 
     if data.startswith("editad|"):
@@ -838,7 +842,7 @@ async def send_my_reminders(user_id: int):
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT r.id, ads.title, s.session_time FROM reminders r "
+        "SELECT r.id, ads.title, s.session_time, ads.channel_message_id FROM reminders r "
         "JOIN ad_sessions s ON r.session_id = s.id "
         "JOIN ads ON s.ad_id = ads.id "
         "WHERE r.user_id = ? AND s.session_time > ? ORDER BY s.session_time ASC",
@@ -851,13 +855,15 @@ async def send_my_reminders(user_id: int):
         await client.send_message(user_id, "شما در حال حاضر یادآوری فعالی ندارید.")
         return
 
-    for reminder_id, title, session_time_str in rows:
+    for reminder_id, title, session_time_str, channel_message_id in rows:
         session_time = datetime.strptime(session_time_str, "%Y-%m-%d %H:%M:%S")
         remaining = format_remaining(session_time)
         display = to_jalali_display(session_time_str)
 
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton(text="❌ لغو یادآوری", callback_data=f"cancelrem|{reminder_id}"))
+        if channel_message_id:
+            markup.add(InlineKeyboardButton(text="👁 مشاهده آگهی رویداد", url=build_channel_post_link(channel_message_id)), row=2)
 
         text = f"📌 {title}\n🕒 {display}\n⏳ {remaining}"
         await client.send_message(user_id, text, components=markup)
@@ -930,8 +936,7 @@ async def submit_pending_event(user_id: int, data: dict):
     conn.close()
 
     await client.send_message(user_id, "✅ رویداد شما ثبت شد و برای بررسی مدیر ارسال گردید.")
-    await client.send_message(ADMIN_ID, f"📥 یک رویداد جدید در انتظار تایید است.\nبرای بررسی، از منوی «{BTN_PENDING_EVENTS}» استفاده کنید.")
-
+    await notify_admins(f"📥 یک رویداد جدید در انتظار تایید است.\nبرای بررسی، از منوی «{BTN_PENDING_EVENTS}» استفاده کنید.")
 
 async def send_pending_events(admin_user_id: int):
     conn = get_db()
@@ -1040,4 +1045,11 @@ async def reject_pending_event(pending_id: int, reason: str):
     reason_text = f"\nدلیل: {reason}" if reason and reason != "/skip" else ""
     await client.send_message(submitted_by, f"❌ رویداد پیشنهادی شما «{title}» رد شد.{reason_text}")
 
+
+async def notify_admins(text: str):
+    for admin_id in ADMIN_IDS:
+        try:
+            await client.send_message(admin_id, text)
+        except Exception as e:
+            print(f"خطا در ارسال پیام به ادمین {admin_id}: {e}")
 client.run()
