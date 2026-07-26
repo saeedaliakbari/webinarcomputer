@@ -21,6 +21,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_DIR = os.path.join(BASE_DIR, "db")
 os.makedirs(DB_DIR, exist_ok=True)
 DB_PATH = os.path.join(DB_DIR, "bot_database.db")
+PAGE_SIZE = 5
 
 admin_states = {}
 
@@ -111,6 +112,15 @@ def format_remaining(event_time: datetime) -> str:
         parts.append(f"{minutes} دقیقه")
     return (" و ".join(parts) + " مانده") if parts else "کمتر از یک دقیقه مانده"
 
+def build_pagination_markup(list_type: str, page: int, has_next: bool, has_prev: bool):
+    markup = InlineKeyboardMarkup()
+    row = 1
+    if has_prev:
+        markup.add(InlineKeyboardButton(text="◀️ قبلی", callback_data=f"page|{list_type}|{page-1}"), row=row)
+        row += 1
+    if has_next:
+        markup.add(InlineKeyboardButton(text="▶️ بعدی", callback_data=f"page|{list_type}|{page+1}"), row=row)
+    return markup if (has_next or has_prev) else None
 
 # ================= ready =================
 @client.event
@@ -512,31 +522,58 @@ async def update_ad_field(ad_id: int, field: str, value):
 
 
 # ================= لیست آگهی‌ها =================
-async def send_ads_list(user_id: int):
+PAGE_SIZE = 5
+
+async def send_ads_list(user_id: int, page: int = 0):
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, title, channel_message_id FROM ads ORDER BY id DESC")
+    cursor.execute("SELECT COUNT(*) FROM ads")
+    total = cursor.fetchone()[0]
+
+    cursor.execute(
+        "SELECT id, title, channel_message_id FROM ads ORDER BY id DESC LIMIT ? OFFSET ?",
+        (PAGE_SIZE, page * PAGE_SIZE)
+    )
     ads = cursor.fetchall()
     conn.close()
 
     if not ads:
-        await client.send_message(user_id, "هنوز هیچ آگهی‌ای ثبت نشده است.")
+        await client.send_message(user_id, "هیچ آگهی‌ای در این صفحه وجود ندارد." if page > 0 else "هنوز هیچ آگهی‌ای ثبت نشده است.")
         return
 
-    for ad_id, title, channel_message_id  in ads:
+    for ad_id, title, channel_message_id in ads:
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton(text="✏️ ویرایش", callback_data=f"editad|{ad_id}"))
-        markup.add(InlineKeyboardButton(text="🗑 حذف", callback_data=f"delad|{ad_id}"))
+        markup.add(InlineKeyboardButton(text="✏️ ویرایش", callback_data=f"editad|{ad_id}"), row=1)
+        markup.add(InlineKeyboardButton(text="🗑 حذف", callback_data=f"delad|{ad_id}"), row=2)
         if channel_message_id:
             markup.add(InlineKeyboardButton(text="👁 مشاهده در کانال", url=build_channel_post_link(channel_message_id)), row=3)
         await client.send_message(user_id, f"📌 {title}", components=markup)
 
+    has_next = (page + 1) * PAGE_SIZE < total
+    has_prev = page > 0
+    nav_markup = build_pagination_markup("ads", page, has_next, has_prev)
+    if nav_markup:
+        await client.send_message(user_id, f"صفحه {page + 1}", components=nav_markup)
 
 # ================= callback ها =================
 @client.event
 async def on_callback(callback_query):
     data = callback_query.data
     user_id = callback_query.from_user.id
+
+    if data.startswith("page|"):
+        _, list_type, page_str = data.split("|")
+        page = int(page_str)
+
+        if list_type == "ads":
+            await send_ads_list(user_id, page)
+        elif list_type == "pending":
+            await send_pending_events(user_id, page)
+        elif list_type == "myrem":
+            await send_my_reminders(user_id, page)
+        elif list_type == "past":
+            await send_past_events(user_id, page)
+        return
 
     if data.startswith("checkjoin_"):
         payload = data.split("checkjoin_", 1)[1]
@@ -837,22 +874,29 @@ async def send_profile(message: Message):
     await message.reply(text)
 
 
-async def send_my_reminders(user_id: int):
+async def send_my_reminders(user_id: int, page: int = 0):
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute(
+        "SELECT COUNT(*) FROM reminders r JOIN ad_sessions s ON r.session_id = s.id "
+        "WHERE r.user_id = ? AND s.session_time > ?",
+        (user_id, now_str)
+    )
+    total = cursor.fetchone()[0]
+
+    cursor.execute(
         "SELECT r.id, ads.title, s.session_time, ads.channel_message_id FROM reminders r "
         "JOIN ad_sessions s ON r.session_id = s.id "
         "JOIN ads ON s.ad_id = ads.id "
-        "WHERE r.user_id = ? AND s.session_time > ? ORDER BY s.session_time ASC",
-        (user_id, now_str)
+        "WHERE r.user_id = ? AND s.session_time > ? ORDER BY s.session_time ASC LIMIT ? OFFSET ?",
+        (user_id, now_str, PAGE_SIZE, page * PAGE_SIZE)
     )
     rows = cursor.fetchall()
     conn.close()
 
     if not rows:
-        await client.send_message(user_id, "شما در حال حاضر یادآوری فعالی ندارید.")
+        await client.send_message(user_id, "یادآوری‌ای در این صفحه وجود ندارد." if page > 0 else "شما در حال حاضر یادآوری فعالی ندارید.")
         return
 
     for reminder_id, title, session_time_str, channel_message_id in rows:
@@ -861,40 +905,58 @@ async def send_my_reminders(user_id: int):
         display = to_jalali_display(session_time_str)
 
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton(text="❌ لغو یادآوری", callback_data=f"cancelrem|{reminder_id}"))
+        markup.add(InlineKeyboardButton(text="❌ لغو یادآوری", callback_data=f"cancelrem|{reminder_id}"), row=1)
         if channel_message_id:
             markup.add(InlineKeyboardButton(text="👁 مشاهده آگهی رویداد", url=build_channel_post_link(channel_message_id)), row=2)
 
         text = f"📌 {title}\n🕒 {display}\n⏳ {remaining}"
         await client.send_message(user_id, text, components=markup)
 
-    markup_all = InlineKeyboardMarkup()
-    markup_all.add(InlineKeyboardButton(text="🔕 لغو همه یادآوری‌ها", callback_data="cancelallrem"))
-    await client.send_message(user_id, "برای لغو همه‌ی یادآوری‌ها:", components=markup_all)
+    has_next = (page + 1) * PAGE_SIZE < total
+    has_prev = page > 0
+    nav_markup = build_pagination_markup("myrem", page, has_next, has_prev)
+    if nav_markup:
+        await client.send_message(user_id, f"صفحه {page + 1}", components=nav_markup)
 
+    if page == 0 and total > 0:
+        markup_all = InlineKeyboardMarkup()
+        markup_all.add(InlineKeyboardButton(text="🔕 لغو همه یادآوری‌ها", callback_data="cancelallrem"))
+        await client.send_message(user_id, "برای لغو همه‌ی یادآوری‌ها:", components=markup_all)
 
-async def send_past_events(user_id: int):
+async def send_past_events(user_id: int, page: int = 0):
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute(
+        "SELECT COUNT(*) FROM reminders r JOIN ad_sessions s ON r.session_id = s.id "
+        "WHERE r.user_id = ? AND s.session_time <= ?",
+        (user_id, now_str)
+    )
+    total = cursor.fetchone()[0]
+
+    cursor.execute(
         "SELECT ads.title, s.session_time FROM reminders r "
         "JOIN ad_sessions s ON r.session_id = s.id "
         "JOIN ads ON s.ad_id = ads.id "
-        "WHERE r.user_id = ? AND s.session_time <= ? ORDER BY s.session_time DESC LIMIT 25",
-        (user_id, now_str)
+        "WHERE r.user_id = ? AND s.session_time <= ? ORDER BY s.session_time DESC LIMIT ? OFFSET ?",
+        (user_id, now_str, PAGE_SIZE, page * PAGE_SIZE)
     )
     rows = cursor.fetchall()
     conn.close()
 
     if not rows:
-        await client.send_message(user_id, "شما رویداد گذشته‌ای ندارید.")
+        await client.send_message(user_id, "رویدادی در این صفحه وجود ندارد." if page > 0 else "شما رویداد گذشته‌ای ندارید.")
         return
 
     lines = [f"📌 {title} — {to_jalali_display(session_time_str)}" for title, session_time_str in rows]
     text = "📅 رویدادهای گذشته‌ی شما:\n\n" + "\n".join(lines)
     await client.send_message(user_id, text)
 
+    has_next = (page + 1) * PAGE_SIZE < total
+    has_prev = page > 0
+    nav_markup = build_pagination_markup("past", page, has_next, has_prev)
+    if nav_markup:
+        await client.send_message(user_id, f"صفحه {page + 1}", components=nav_markup)
 
 # ================= عضویت =================
 async def is_user_member(user_id: int) -> bool:
@@ -938,15 +1000,21 @@ async def submit_pending_event(user_id: int, data: dict):
     await client.send_message(user_id, "✅ رویداد شما ثبت شد و برای بررسی مدیر ارسال گردید.")
     await notify_admins(f"📥 یک رویداد جدید در انتظار تایید است.\nبرای بررسی، از منوی «{BTN_PENDING_EVENTS}» استفاده کنید.")
 
-async def send_pending_events(admin_user_id: int):
+async def send_pending_events(admin_user_id: int, page: int = 0):
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, title, description, photo_file_id, submitted_by FROM pending_events ORDER BY id ASC")
+    cursor.execute("SELECT COUNT(*) FROM pending_events")
+    total = cursor.fetchone()[0]
+
+    cursor.execute(
+        "SELECT id, title, description, photo_file_id, submitted_by FROM pending_events ORDER BY id ASC LIMIT ? OFFSET ?",
+        (PAGE_SIZE, page * PAGE_SIZE)
+    )
     rows = cursor.fetchall()
     conn.close()
 
     if not rows:
-        await client.send_message(admin_user_id, "هیچ رویداد در انتظار تاییدی وجود ندارد.")
+        await client.send_message(admin_user_id, "هیچ رویداد در این صفحه وجود ندارد." if page > 0 else "هیچ رویداد در انتظار تاییدی وجود ندارد.")
         return
 
     for pid, title, description, photo_file_id, submitted_by in rows:
@@ -959,7 +1027,6 @@ async def send_pending_events(admin_user_id: int):
         sessions = [r[0] for r in cursor.fetchall()]
         conn.close()
 
-        # گرفتن یوزرنیم/نام ثبت‌کننده
         try:
             submitter = await client.get_user(submitted_by)
             username_display = f"@{submitter.username}" if submitter.username else "ندارد"
@@ -977,12 +1044,9 @@ async def send_pending_events(admin_user_id: int):
         sessions_text = "\n".join(session_lines) if session_lines else "بدون جلسه ثبت‌شده"
 
         text = (
-            f"📌 {title}\n\n"
-            f"{description}\n\n"
+            f"📌 {title}\n\n{description}\n\n"
             f"🕒 جلسات:\n{sessions_text}\n\n"
-            f"👤 ثبت‌کننده: {name_display}\n"
-            f"🆔 شناسه: {submitted_by}\n"
-            f"یوزرنیم: {username_display}"
+            f"👤 ثبت‌کننده: {name_display}\n🆔 شناسه: {submitted_by}\nیوزرنیم: {username_display}"
         )
 
         markup = InlineKeyboardMarkup()
@@ -995,6 +1059,11 @@ async def send_pending_events(admin_user_id: int):
         else:
             await client.send_message(admin_user_id, text, components=markup)
 
+    has_next = (page + 1) * PAGE_SIZE < total
+    has_prev = page > 0
+    nav_markup = build_pagination_markup("pending", page, has_next, has_prev)
+    if nav_markup:
+        await client.send_message(admin_user_id, f"صفحه {page + 1}", components=nav_markup)
 
 async def approve_pending_event(pending_id: int):
     conn = get_db()
