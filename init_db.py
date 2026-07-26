@@ -59,6 +59,16 @@ CREATE TABLE IF NOT EXISTS pending_event_sessions (
 )
 """)
 
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS feedbacks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    message TEXT NOT NULL,
+    reply TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    replied INTEGER DEFAULT 0
+)
+""")
 conn.commit()
 conn.close()
 print("دیتابیس بازسازی شد.")

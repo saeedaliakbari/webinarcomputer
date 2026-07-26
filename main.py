@@ -39,12 +39,15 @@ BTN_FINISH_SESSIONS = "✅ پایان و ثبت آگهی"
 ADMIN_PANEL_COMMAND = "مدیریت"
 BTN_SUBMIT_EVENT = "📝 ثبت رویداد"
 BTN_PENDING_EVENTS = "📥 درخواست‌های رویداد"
+BTN_SEND_FEEDBACK = "💬 ارسال نظر و پیشنهاد"
+BTN_FEEDBACKS = "📩 نظرات کاربران"
 
 def build_admin_menu():
     markup = MenuKeyboardMarkup()
     markup.add(MenuKeyboardButton(text=BTN_NEW_AD), row=1)
     markup.add(MenuKeyboardButton(text=BTN_LIST_ADS), row=1)
     markup.add(MenuKeyboardButton(text=BTN_PENDING_EVENTS), row=2)
+    markup.add(MenuKeyboardButton(text=BTN_FEEDBACKS), row=2)
     markup.add(MenuKeyboardButton(text=BTN_BACK_TO_USER_MENU), row=3)
     return markup
 
@@ -54,6 +57,7 @@ def build_user_menu():
     markup.add(MenuKeyboardButton(text=BTN_MY_REMINDERS), row=1)
     markup.add(MenuKeyboardButton(text=BTN_PAST_EVENTS), row=2)
     markup.add(MenuKeyboardButton(text=BTN_SUBMIT_EVENT), row=2)
+    markup.add(MenuKeyboardButton(text=BTN_SEND_FEEDBACK), row=3)
     markup.add(MenuKeyboardButton(text=BTN_HELP), row=3)
     return markup
 
@@ -161,7 +165,10 @@ async def on_message(message: Message):
         admin_states[user_id] = {"mode": "submitevent", "step": "title", "data": {"sessions": []}}
         await message.reply("عنوان رویداد پیشنهادی رو بفرست:")
         return
-
+    if content == BTN_SEND_FEEDBACK:
+        admin_states[user_id] = {"mode": "feedback", "step": "message"}
+        await message.reply("نظر یا پیشنهاد خود را بنویسید:")
+        return
     # ---- دکمه‌های منوی کاربر ----
     if content == BTN_PROFILE:
         await send_profile(message)
@@ -193,7 +200,10 @@ async def on_message(message: Message):
     if content == BTN_PENDING_EVENTS:
         await send_pending_events(user_id)
         return
-
+    if content == BTN_FEEDBACKS:
+        await send_feedbacks(user_id)
+        return
+    
 async def handle_admin_conversation(message: Message, state: dict):
     user_id = message.from_user.id
     content = (message.content or "").strip()
@@ -401,6 +411,36 @@ async def handle_admin_conversation(message: Message, state: dict):
         await reject_pending_event(state["pending_id"], content)
         await message.reply("رویداد رد شد و به کاربر اطلاع داده شد.", components=build_admin_menu())
         del admin_states[user_id]
+    # =====================  نظر=====================
+    elif mode == "feedback":
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO feedbacks (user_id, message) VALUES (?, ?)", (user_id, content))
+        conn.commit()
+        conn.close()
+
+        await message.reply("✅ نظر شما ثبت شد و برای بررسی ارسال گردید. ممنون از بازخوردتان 🌿", components=build_user_menu())
+        await notify_admins(f"💬 یک نظر جدید دریافت شد.\nبرای مشاهده از منوی «{BTN_FEEDBACKS}» استفاده کنید.")
+        del admin_states[user_id]
+    # ===================== پاسخ نظر=====================
+    elif mode == "replyfeedback":
+        feedback_id = state["feedback_id"]
+        target_user_id = state["target_user_id"]
+
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE feedbacks SET reply = ?, replied = 1 WHERE id = ?", (content, feedback_id))
+        conn.commit()
+        conn.close()
+
+        try:
+            await client.send_message(target_user_id, f"📩 پاسخ به نظر شما:\n\n{content}")
+            await message.reply("پاسخ با موفقیت ارسال شد ✅", components=build_admin_menu())
+        except Exception as e:
+            await message.reply(f"پاسخ ذخیره شد ولی ارسال آن به کاربر با خطا مواجه شد: {e}", components=build_admin_menu())
+
+        del admin_states[user_id]
+
 # ================= ثبت نهایی آگهی جدید =================
 async def finalize_ad(data):
     conn = get_db()
@@ -568,6 +608,8 @@ async def on_callback(callback_query):
             await send_my_reminders(user_id, page)
         elif list_type == "past":
             await send_past_events(user_id, page)
+        elif list_type == "feedback":
+            await send_feedbacks(user_id, page)
         return
 
     if data.startswith("checkjoin_"):
@@ -702,7 +744,11 @@ async def on_callback(callback_query):
         admin_states[user_id] = {"mode": "rejectreason", "pending_id": pending_id}
         await client.send_message(user_id, "دلیل رد کردن رو بنویس (یا برای رد بدون دلیل بنویس /skip):")
         return
-
+    if data.startswith("replyfb|"):
+        _, fid_str, sender_id_str = data.split("|")
+        admin_states[user_id] = {"mode": "replyfeedback", "feedback_id": int(fid_str), "target_user_id": int(sender_id_str)}
+        await client.send_message(user_id, "متن پاسخ را بنویسید:")
+        return
 
 # ================= یادآوری‌ها (بر پایه جلسه) =================
 async def register_session_reminder(session_id: int, user_id: int):
@@ -1152,6 +1198,52 @@ async def show_ad_details(user_id: int, ad_id: int):
     else:
         await client.send_message(user_id, text)
 
+
+async def send_feedbacks(admin_user_id: int, page: int = 0):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM feedbacks")
+    total = cursor.fetchone()[0]
+
+    cursor.execute(
+        "SELECT id, user_id, message, reply, replied FROM feedbacks ORDER BY id DESC LIMIT ? OFFSET ?",
+        (PAGE_SIZE, page * PAGE_SIZE)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        await client.send_message(admin_user_id, "نظری در این صفحه وجود ندارد." if page > 0 else "هنوز هیچ نظری ثبت نشده است.")
+        return
+
+    for fid, sender_id, message_text, reply, replied in rows:
+        try:
+            sender = await client.get_user(sender_id)
+            username_display = f"@{sender.username}" if sender.username else "ندارد"
+            name_display = sender.first_name
+        except Exception:
+            username_display = "نامشخص"
+            name_display = "نامشخص"
+
+        status = "✅ پاسخ داده شده" if replied else "🕓 در انتظار پاسخ"
+        text = (
+            f"💬 {message_text}\n\n"
+            f"👤 {name_display} ({username_display})\n"
+            f"🆔 {sender_id}\n"
+            f"وضعیت: {status}"
+        )
+        if replied and reply:
+            text += f"\n\n↩️ پاسخ ارسالی:\n{reply}"
+
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton(text="↩️ پاسخ" if not replied else "↩️ ویرایش پاسخ", callback_data=f"replyfb|{fid}|{sender_id}"), row=1)
+        await client.send_message(admin_user_id, text, components=markup)
+
+    has_next = (page + 1) * PAGE_SIZE < total
+    has_prev = page > 0
+    nav_markup = build_pagination_markup("feedback", page, has_next, has_prev)
+    if nav_markup:
+        await client.send_message(admin_user_id, f"صفحه {page + 1}", components=nav_markup)
 
 
 client.run()
