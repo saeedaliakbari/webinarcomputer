@@ -488,7 +488,8 @@ async def post_ad_to_channel(ad_id: int):
         sent_message = await client.send_photo(CHANNEL_ID, photo, caption=text, components=markup)
     else:
         sent_message = await client.send_message(CHANNEL_ID, text, components=markup)
-
+    print("FULL DICT:", sent_message.to_dict())
+    print(sent_message.to_dict(), flush=True)
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute("UPDATE ads SET channel_message_id = ? WHERE id = ?", (sent_message.message_id, ad_id))
