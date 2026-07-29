@@ -1,14 +1,6 @@
 import sqlite3
-conn = sqlite3.connect("db/bot_database.db")
-cursor = conn.cursor()
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    first_name TEXT,
-    username TEXT,
-    first_seen TEXT DEFAULT CURRENT_TIMESTAMP
-)
-""")
+conn = sqlite3.connect('db/bot_database.db')
+conn.execute('ALTER TABLE ad_sessions ADD COLUMN video_file_id TEXT')
 conn.commit()
 conn.close()
-print("جدول users اضافه شد.")
+print('add video column')
