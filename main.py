@@ -448,23 +448,23 @@ async def handle_admin_conversation(message: Message, state: dict):
         del admin_states[user_id]
     # ===================== ثبت ویدیو برای جلسه =====================
     elif mode == "setvideo":
-        if message.video:
-            video_file_id = message.video.file_id
-            session_id = state["session_id"]
+        link = content.strip()
+        if not (link.startswith("http://") or link.startswith("https://")):
+            await message.reply("لطفاً یک لینک معتبر ارسال کنید (باید با http:// یا https:// شروع شود):")
+            return
 
-            conn = get_db()
-            cursor = conn.cursor()
-            cursor.execute("UPDATE ad_sessions SET video_file_id = ? WHERE id = ?", (video_file_id, session_id))
-            cursor.execute("SELECT ad_id FROM ad_sessions WHERE id = ?", (session_id,))
-            ad_id = cursor.fetchone()[0]
-            conn.commit()
-            conn.close()
+        session_id = state["session_id"]
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE ad_sessions SET video_link = ? WHERE id = ?", (link, session_id))
+        cursor.execute("SELECT ad_id FROM ad_sessions WHERE id = ?", (session_id,))
+        ad_id = cursor.fetchone()[0]
+        conn.commit()
+        conn.close()
 
-            await republish_ad_after_edit(ad_id)
-            await message.reply("✅ ویدیو با موفقیت ثبت شد و پیام کانال به‌روزرسانی شد.", components=build_admin_menu())
-            del admin_states[user_id]
-        else:
-            await message.reply("لطفاً یک فایل ویدیو ارسال کنید.")
+        await republish_ad_after_edit(ad_id)
+        await message.reply("✅ لینک ویدیو ثبت شد و پیام کانال به‌روزرسانی شد.", components=build_admin_menu())
+        del admin_states[user_id]
 # ================= ثبت نهایی آگهی جدید =================
 async def finalize_ad(data):
     conn = get_db()
@@ -513,7 +513,7 @@ async def post_ad_to_channel(ad_id: int):
         return
     title, description, photo_file_id = row
 
-    cursor.execute("SELECT id, session_time, video_file_id FROM ad_sessions WHERE ad_id = ? ORDER BY session_time ASC", (ad_id,))
+    cursor.execute("SELECT id, session_time, video_link FROM ad_sessions WHERE ad_id = ? ORDER BY session_time ASC", (ad_id,))
     sessions = cursor.fetchall()
     conn.close()
 
@@ -529,7 +529,7 @@ async def post_ad_to_channel(ad_id: int):
         row_num+=1
 
     numerals = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
-    for idx, (session_id, session_time, video_file_id) in enumerate(sessions):  # ← کوئری باید video_file_id رو هم بگیره
+    for idx, (session_id, session_time, video_link) in enumerate(sessions):
         display = to_jalali_display(session_time)
         emoji = numerals[idx] if idx < len(numerals) else f"{idx+1}."
         session_lines.append(f"{emoji} {display}")
@@ -541,12 +541,9 @@ async def post_ad_to_channel(ad_id: int):
         ), row=row_num)
         row_num += 1
 
-        if video_file_id:
+        if video_link:
             video_label = f"🎥 ویدیوی جلسه {idx+1}" if len(sessions) > 1 else "🎥 مشاهده ویدیو"
-            markup.add(InlineKeyboardButton(
-                text=video_label,
-                url=f"https://ble.ir/{BOT_USERNAME}?start=video_sess_{session_id}"
-            ), row=row_num)
+            markup.add(InlineKeyboardButton(text=video_label, url=video_link), row=row_num)
             row_num += 1
 
     sessions_text = "\n".join(session_lines)
@@ -704,7 +701,7 @@ async def on_callback(callback_query):
         markup.add(InlineKeyboardButton(text="توضیحات", callback_data=f"ef|description|{ad_id}"), row=2)
         markup.add(InlineKeyboardButton(text="جلسات (تاریخ/ساعت)", callback_data=f"ef|sessions|{ad_id}"), row=3)
         markup.add(InlineKeyboardButton(text="بنر", callback_data=f"ef|banner|{ad_id}"), row=4)
-        markup.add(InlineKeyboardButton(text="🎥 ویدیوهای جلسات", callback_data=f"videolist|{ad_id}"), row=5)
+        markup.add(InlineKeyboardButton(text="🎥 لینک ویدیوهای جلسات", callback_data=f"videolist|{ad_id}"), row=5)
         await client.send_message(user_id, "کدام بخش را می‌خواهید ویرایش کنید؟", components=markup)
         return
 
@@ -786,7 +783,7 @@ async def on_callback(callback_query):
         ad_id = int(data.split("|")[1])
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute("SELECT id, session_time, video_file_id FROM ad_sessions WHERE ad_id = ? ORDER BY session_time ASC", (ad_id,))
+        cursor.execute("SELECT id, session_time, video_link FROM ad_sessions WHERE ad_id = ? ORDER BY session_time ASC", (ad_id,))
         sessions = cursor.fetchall()
         conn.close()
 
@@ -794,11 +791,11 @@ async def on_callback(callback_query):
             await client.send_message(user_id, "این آگهی جلسه‌ای ندارد.")
             return
 
-        for session_id, session_time, video_file_id in sessions:
+        for session_id, session_time, video_link in sessions:
             display = to_jalali_display(session_time)
-            status = "🎥 دارد" if video_file_id else "بدون ویدیو"
+            status = f"🎥 دارد: {video_link}" if video_link else "بدون لینک ویدیو"
             markup = InlineKeyboardMarkup()
-            label = "🔄 تغییر ویدیو" if video_file_id else "➕ افزودن ویدیو"
+            label = "🔄 تغییر لینک" if video_link else "➕ افزودن لینک"
             markup.add(InlineKeyboardButton(text=label, callback_data=f"setvideo|{session_id}"), row=1)
             await client.send_message(user_id, f"🕒 {display}\nوضعیت: {status}", components=markup)
         return
@@ -806,7 +803,7 @@ async def on_callback(callback_query):
     if data.startswith("setvideo|"):
         session_id = int(data.split("|")[1])
         admin_states[user_id] = {"mode": "setvideo", "session_id": session_id}
-        await client.send_message(user_id, "ویدیوی این جلسه را ارسال کنید:")
+        await client.send_message(user_id, "لینک ویدیوی این جلسه را ارسال کنید (مثال: https://www.aparat.com/v/xxxxx):")
         return
 
 
@@ -938,7 +935,7 @@ async def send_session_video(session_id: int, user_id: int):
 
     video = InputFile(row[0])
     await client.send_video(user_id, video)
-    
+
 async def reminder_loop():
     while True:
         await asyncio.sleep(60)

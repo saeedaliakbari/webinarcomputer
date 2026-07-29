@@ -23,6 +23,7 @@ CREATE TABLE ad_sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ad_id INTEGER NOT NULL,
     video_file_id TEXT NULL,
+    video_link TEXT NULL,
     session_time TEXT NOT NULL,
     FOREIGN KEY(ad_id) REFERENCES ads(id)
 )
