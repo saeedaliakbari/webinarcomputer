@@ -42,6 +42,12 @@ BTN_PENDING_EVENTS = "📥 درخواست‌های رویداد"
 BTN_SEND_FEEDBACK = "💬 ارسال نظر و پیشنهاد"
 BTN_FEEDBACKS = "📩 نظرات کاربران"
 BTN_STATS = "📊 آمار ربات"
+CANCEL_TEXT = "❌ لغو عملیات"
+
+def build_cancel_menu():
+    markup = MenuKeyboardMarkup()
+    markup.add(MenuKeyboardButton(text=CANCEL_TEXT), row=1)
+    return markup
 
 def build_admin_menu():
     markup = MenuKeyboardMarkup()
@@ -66,12 +72,14 @@ def build_user_menu():
 def build_skip_menu():
     markup = MenuKeyboardMarkup()
     markup.add(MenuKeyboardButton(text=SKIP_TEXT), row=1)
+    markup.add(MenuKeyboardButton(text=CANCEL_TEXT), row=2)
     return markup
 
 def build_session_decision_menu():
     markup = MenuKeyboardMarkup()
     markup.add(MenuKeyboardButton(text=BTN_ADD_SESSION), row=1)
     markup.add(MenuKeyboardButton(text=BTN_FINISH_SESSIONS), row=1)
+    markup.add(MenuKeyboardButton(text=CANCEL_TEXT), row=2)
     return markup
 
 
@@ -140,6 +148,16 @@ async def on_message(message: Message):
 
     user_id = message.from_user.id
     content = (message.content or "").strip()
+
+    if content == CANCEL_TEXT:
+            if user_id in admin_states:
+                del admin_states[user_id]
+            if user_id in ADMIN_IDS:
+                await message.reply("عملیات لغو شد.", components=build_admin_menu())
+            else:
+                await message.reply("عملیات لغو شد.", components=build_user_menu())
+            return
+
     await upsert_user(message.from_user)
 
     # ---- شروع ----
@@ -152,7 +170,8 @@ async def on_message(message: Message):
         await handle_start_payload(user_id, payload)
         await message.reply("از منوی زیر استفاده کنید:", components=build_user_menu())
         return
-
+    
+    
     # ---- ورود ادمین به پنل مدیریت ----
     if content == ADMIN_PANEL_COMMAND and user_id in ADMIN_IDS:
         await message.reply("🔧 وارد پنل مدیریت شدید.", components=build_admin_menu())
@@ -166,11 +185,11 @@ async def on_message(message: Message):
     # ---- دکمه ثبت رویداد (کاربر عادی) ----
     if content == BTN_SUBMIT_EVENT:
         admin_states[user_id] = {"mode": "submitevent", "step": "title", "data": {"sessions": []}}
-        await message.reply("عنوان رویداد پیشنهادی رو بفرست:")
+        await message.reply("عنوان رویداد پیشنهادی رو بفرست:", components=build_cancel_menu())
         return
     if content == BTN_SEND_FEEDBACK:
         admin_states[user_id] = {"mode": "feedback", "step": "message"}
-        await message.reply("نظر یا پیشنهاد خود را بنویسید:")
+        await message.reply("نظر یا پیشنهاد خود را بنویسید:", components=build_cancel_menu())
         return
     # ---- دکمه‌های منوی کاربر ----
     if content == BTN_PROFILE:
@@ -195,7 +214,7 @@ async def on_message(message: Message):
         return
     if content == BTN_NEW_AD:
         admin_states[user_id] = {"mode": "newad", "step": "title", "data": {"sessions": []}}
-        await message.reply("عنوان رویداد رو بفرست:")
+        await message.reply("عنوان رویداد رو بفرست:", components=build_cancel_menu())
         return
     if content == BTN_LIST_ADS:
         await send_ads_list(user_id)
@@ -222,12 +241,12 @@ async def handle_admin_conversation(message: Message, state: dict):
         if step == "title":
             state["data"]["title"] = content
             state["step"] = "description"
-            await message.reply("توضیحات رویداد رو بفرست:")
+            await message.reply("توضیحات رویداد رو بفرست:", components=build_cancel_menu())
 
         elif step == "description":
             state["data"]["description"] = content
             state["step"] = "session_date"
-            await message.reply(f"تاریخ جلسه {len(state['data']['sessions']) + 1} رو بفرست (فرمت: 14050503):")
+            await message.reply(f"تاریخ جلسه {len(state['data']['sessions']) + 1} رو بفرست (فرمت: 14050503):", components=build_cancel_menu())
 
         elif step == "session_date":
             try:
@@ -237,7 +256,7 @@ async def handle_admin_conversation(message: Message, state: dict):
                 return
             state["_pending_date"] = jalali_date
             state["step"] = "session_time"
-            await message.reply("ساعت این جلسه رو بفرست (فرمت: 1730):")
+            await message.reply("ساعت این جلسه رو بفرست (فرمت: 1730):", components=build_cancel_menu())
 
         elif step == "session_time":
             try:
@@ -246,7 +265,7 @@ async def handle_admin_conversation(message: Message, state: dict):
                 jalali_dt = jdatetime.datetime(jalali_date.year, jalali_date.month, jalali_date.day, hour, minute)
                 gregorian_dt = jalali_dt.togregorian()
             except ValueError:
-                await message.reply("فرمت ساعت اشتباهه. دوباره امتحان کن (مثال: 1730):")
+                await message.reply("فرمت ساعت اشتباهه. دوباره امتحان کن (مثال: 1730):", components=build_cancel_menu())
                 return
 
             state["data"]["sessions"].append(gregorian_dt.strftime("%Y-%m-%d %H:%M:%S"))
@@ -260,7 +279,7 @@ async def handle_admin_conversation(message: Message, state: dict):
         elif step == "session_decision":
             if content == BTN_ADD_SESSION:
                 state["step"] = "session_date"
-                await message.reply(f"تاریخ جلسه {len(state['data']['sessions']) + 1} رو بفرست (فرمت: 14050503):")
+                await message.reply(f"تاریخ جلسه {len(state['data']['sessions']) + 1} رو بفرست (فرمت: 14050503):", components=build_cancel_menu())
             elif content == BTN_FINISH_SESSIONS:
                 state["step"] = "banner"
                 await message.reply("اگه بنر داری بفرست، یا از دکمه زیر رد کن:", components=build_skip_menu())
@@ -292,7 +311,7 @@ async def handle_admin_conversation(message: Message, state: dict):
                 return
             state["_pending_date"] = jalali_date
             state["step"] = "session_time"
-            await message.reply("ساعت این جلسه رو بفرست (فرمت: 1730):")
+            await message.reply("ساعت این جلسه رو بفرست (فرمت: 1730):", components=build_cancel_menu())
 
         elif step == "session_time":
             try:
@@ -301,7 +320,7 @@ async def handle_admin_conversation(message: Message, state: dict):
                 jalali_dt = jdatetime.datetime(jalali_date.year, jalali_date.month, jalali_date.day, hour, minute)
                 gregorian_dt = jalali_dt.togregorian()
             except ValueError:
-                await message.reply("فرمت ساعت اشتباهه. دوباره امتحان کن (مثال: 1730):")
+                await message.reply("فرمت ساعت اشتباهه. دوباره امتحان کن (مثال: 1730):", components=build_cancel_menu())
                 return
 
             state["sessions"].append(gregorian_dt.strftime("%Y-%m-%d %H:%M:%S"))
@@ -355,12 +374,12 @@ async def handle_admin_conversation(message: Message, state: dict):
         if step == "title":
             state["data"]["title"] = content
             state["step"] = "description"
-            await message.reply("توضیحات رویداد رو بفرست:")
+            await message.reply("توضیحات رویداد رو بفرست:", components=build_cancel_menu())
 
         elif step == "description":
             state["data"]["description"] = content
             state["step"] = "session_date"
-            await message.reply(f"تاریخ جلسه {len(state['data']['sessions']) + 1} رو بفرست (فرمت: 14050503):")
+            await message.reply(f"تاریخ جلسه {len(state['data']['sessions']) + 1} رو بفرست (فرمت: 14050503):", components=build_cancel_menu())
 
         elif step == "session_date":
             try:
@@ -450,7 +469,7 @@ async def handle_admin_conversation(message: Message, state: dict):
     elif mode == "setvideo":
         link = content.strip()
         if not (link.startswith("http://") or link.startswith("https://")):
-            await message.reply("لطفاً یک لینک معتبر ارسال کنید (باید با http:// یا https:// شروع شود):")
+            await message.reply("لطفاً یک لینک معتبر ارسال کنید (باید با http:// یا https:// شروع شود):", components=build_cancel_menu())
             return
 
         session_id = state["session_id"]
@@ -724,7 +743,7 @@ async def on_callback(callback_query):
             "title": "عنوان جدید را بفرستید:",
             "description": "توضیحات جدید را بفرستید:",
         }
-        await client.send_message(user_id, prompts[field])
+        await client.send_message(user_id, prompts[field], components=build_cancel_menu())
         return
 
     if data.startswith("delad|"):
@@ -772,12 +791,12 @@ async def on_callback(callback_query):
     if data.startswith("pendreject|"):
         pending_id = int(data.split("|")[1])
         admin_states[user_id] = {"mode": "rejectreason", "pending_id": pending_id}
-        await client.send_message(user_id, "دلیل رد کردن رو بنویس (یا برای رد بدون دلیل بنویس /skip):")
+        await client.send_message(user_id, "دلیل رد کردن رو بنویس (یا برای رد بدون دلیل بنویس /skip):", components=build_cancel_menu())
         return
     if data.startswith("replyfb|"):
         _, fid_str, sender_id_str = data.split("|")
         admin_states[user_id] = {"mode": "replyfeedback", "feedback_id": int(fid_str), "target_user_id": int(sender_id_str)}
-        await client.send_message(user_id, "متن پاسخ را بنویسید:")
+        await client.send_message(user_id, "متن پاسخ را بنویسید:", components=build_cancel_menu())
         return
     if data.startswith("videolist|"):
         ad_id = int(data.split("|")[1])
