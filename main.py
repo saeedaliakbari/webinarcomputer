@@ -8,6 +8,7 @@ from bale import (
     MenuKeyboardMarkup, MenuKeyboardButton, InputFile
 )
 from bale.error import BaleError
+from urllib.parse import quote
 
 client = Bot(token=os.environ["BOT_TOKEN"])
 BOT_USERNAME = "webinarcomputerbot"
@@ -22,7 +23,7 @@ DB_DIR = os.path.join(BASE_DIR, "db")
 os.makedirs(DB_DIR, exist_ok=True)
 DB_PATH = os.path.join(DB_DIR, "bot_database.db")
 PAGE_SIZE = 5
-
+IRAN_UTC_OFFSET = timedelta(hours=3, minutes=30)
 admin_states = {}
 
 # ---------- دکمه‌ها ----------
@@ -122,6 +123,24 @@ def format_remaining(event_time: datetime) -> str:
     if minutes and not days:
         parts.append(f"{minutes} دقیقه")
     return (" و ".join(parts) + " مانده") if parts else "کمتر از یک دقیقه مانده"
+
+
+
+
+
+def build_google_calendar_link(title: str, description: str, start_dt: datetime, duration_minutes: int = 60) -> str:
+    start_utc = start_dt - IRAN_UTC_OFFSET
+    end_utc = start_utc + timedelta(minutes=duration_minutes)
+    start_str = start_utc.strftime("%Y%m%dT%H%M%SZ")
+    end_str = end_utc.strftime("%Y%m%dT%H%M%SZ")
+    params = {
+        "action": "TEMPLATE",
+        "text": title,
+        "dates": f"{start_str}/{end_str}",
+        "details": description,
+    }
+    query = "&".join(f"{k}={quote(str(v))}" for k, v in params.items())
+    return f"https://calendar.google.com/calendar/render?{query}"
 
 def build_pagination_markup(list_type: str, page: int, has_next: bool, has_prev: bool):
     markup = InlineKeyboardMarkup()
@@ -564,6 +583,13 @@ async def post_ad_to_channel(ad_id: int):
             video_label = f"🎥 ویدیوی جلسه {idx+1}" if len(sessions) > 1 else "🎥 مشاهده ویدیو"
             markup.add(InlineKeyboardButton(text=video_label, url=video_link), row=row_num)
             row_num += 1
+
+        # ---- دکمه‌ی جدید: افزودن به تقویم گوگل ----
+        session_dt = datetime.strptime(session_time, "%Y-%m-%d %H:%M:%S")
+        calendar_link = build_google_calendar_link(title, description, session_dt)
+        calendar_label = f"📅 افزودن جلسه {idx+1} به تقویم" if len(sessions) > 1 else "📅 افزودن به تقویم گوگل"
+        markup.add(InlineKeyboardButton(text=calendar_label, url=calendar_link), row=row_num)
+        row_num += 1
 
     sessions_text = "\n".join(session_lines)
     text = f"📢 {title}\n\n{description}\n\n🕒 جلسات:\n{sessions_text}"
@@ -1024,7 +1050,7 @@ async def send_my_reminders(user_id: int, page: int = 0):
     total = cursor.fetchone()[0]
 
     cursor.execute(
-        "SELECT r.id, ads.id, ads.title, s.session_time FROM reminders r "
+        "SELECT r.id, ads.id, ads.title, ads.description, s.session_time FROM reminders r "
         "JOIN ad_sessions s ON r.session_id = s.id "
         "JOIN ads ON s.ad_id = ads.id "
         "WHERE r.user_id = ? AND s.session_time > ? ORDER BY s.session_time ASC LIMIT ? OFFSET ?",
@@ -1037,14 +1063,16 @@ async def send_my_reminders(user_id: int, page: int = 0):
         await client.send_message(user_id, "یادآوری‌ای در این صفحه وجود ندارد." if page > 0 else "شما در حال حاضر یادآوری فعالی ندارید.")
         return
 
-    for reminder_id, ad_id, title, session_time_str in rows:
+    for reminder_id, ad_id, title, description, session_time_str in rows:
         session_time = datetime.strptime(session_time_str, "%Y-%m-%d %H:%M:%S")
         remaining = format_remaining(session_time)
         display = to_jalali_display(session_time_str)
+        calendar_link = build_google_calendar_link(title, description, session_time)
 
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton(text="❌ لغو یادآوری", callback_data=f"cancelrem|{reminder_id}"), row=1)
         markup.add(InlineKeyboardButton(text="👁 مشاهده آگهی رویداد", callback_data=f"viewad|{ad_id}"), row=2)
+        markup.add(InlineKeyboardButton(text="📅 افزودن به تقویم گوگل", url=calendar_link), row=3)
 
         text = f"📌 {title}\n🕒 {display}\n⏳ {remaining}"
         await client.send_message(user_id, text, components=markup)
