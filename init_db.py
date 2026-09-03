@@ -36,6 +36,7 @@ CREATE TABLE reminders (
     user_id INTEGER NOT NULL,
     remind_at TEXT NOT NULL,
     sent INTEGER DEFAULT 0,
+    attempt_count INTEGER DEFAULT 0,
     UNIQUE(session_id, user_id),
     FOREIGN KEY(session_id) REFERENCES ad_sessions(id)
 )
@@ -77,6 +78,7 @@ CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
     first_name TEXT,
     username TEXT,
+    quota INTEGER DEFAULT 10,
     first_seen TEXT DEFAULT CURRENT_TIMESTAMP
 )
 """)

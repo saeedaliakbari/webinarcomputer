@@ -24,6 +24,10 @@ os.makedirs(DB_DIR, exist_ok=True)
 DB_PATH = os.path.join(DB_DIR, "bot_database.db")
 PAGE_SIZE = 5
 IRAN_UTC_OFFSET = timedelta(hours=3, minutes=30)
+DEFAULT_QUOTA = 10
+BTN_INCREASE_QUOTA = "🔋 افزایش ظرفیت دریافت"
+MAX_REMINDER_ATTEMPTS = 10
+
 admin_states = {}
 
 # ---------- دکمه‌ها ----------
@@ -57,7 +61,8 @@ def build_admin_menu():
     markup.add(MenuKeyboardButton(text=BTN_PENDING_EVENTS), row=2)
     markup.add(MenuKeyboardButton(text=BTN_FEEDBACKS), row=2)
     markup.add(MenuKeyboardButton(text=BTN_STATS), row=3)
-    markup.add(MenuKeyboardButton(text=BTN_BACK_TO_USER_MENU), row=3)
+    markup.add(MenuKeyboardButton(text=BTN_INCREASE_QUOTA), row=3)
+    markup.add(MenuKeyboardButton(text=BTN_BACK_TO_USER_MENU), row=4)
     return markup
 
 def build_user_menu():
@@ -67,7 +72,8 @@ def build_user_menu():
     markup.add(MenuKeyboardButton(text=BTN_PAST_EVENTS), row=2)
     markup.add(MenuKeyboardButton(text=BTN_SUBMIT_EVENT), row=2)
     markup.add(MenuKeyboardButton(text=BTN_SEND_FEEDBACK), row=3)
-    markup.add(MenuKeyboardButton(text=BTN_HELP), row=3)
+    markup.add(MenuKeyboardButton(text=BTN_INCREASE_QUOTA), row=3)
+    markup.add(MenuKeyboardButton(text=BTN_HELP), row=4)
     return markup
 
 def build_skip_menu():
@@ -223,7 +229,10 @@ async def on_message(message: Message):
     if content == BTN_HELP:
         await message.reply("این ربات برای دریافت یادآوری رویدادهای کانال است. کافیست روی دکمه یادآوری زیر هر آگهی در کانال بزنید.")
         return
-
+    if content == BTN_INCREASE_QUOTA:
+        new_quota = await increment_quota(user_id, 1)
+        await message.reply(f"✅ ظرفیت دریافت پیام شما ۱ واحد افزایش یافت.\nظرفیت فعلی: {new_quota}")
+        return
     # ---- از اینجا فقط ادمین ----
     if user_id not in ADMIN_IDS:
         return
@@ -704,6 +713,11 @@ async def on_callback(callback_query):
         conn.close()
         await client.send_message(user_id, "یادآوری لغو شد ✅")
         return
+    
+    if data.startswith("gotit|"):
+        new_quota = await increment_quota(user_id, 1)
+        await client.send_message(user_id, f"👍 ثبت شد. ظرفیت فعلی شما: {new_quota}")
+        return
 
     if data == "cancelallrem":
         markup = InlineKeyboardMarkup()
@@ -988,7 +1002,7 @@ async def reminder_loop():
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT reminders.id, reminders.user_id, ads.title, ad_sessions.session_time "
+            "SELECT reminders.id, reminders.user_id, reminders.attempt_count, ads.title, ad_sessions.session_time "
             "FROM reminders "
             "JOIN ad_sessions ON reminders.session_id = ad_sessions.id "
             "JOIN ads ON ad_sessions.ad_id = ads.id "
@@ -997,15 +1011,26 @@ async def reminder_loop():
         )
         due_reminders = cursor.fetchall()
 
-        for reminder_id, user_id, ad_title, session_time in due_reminders:
+        for reminder_id, user_id, attempt_count, ad_title, session_time in due_reminders:
             try:
                 display = to_jalali_display(session_time)
-                await client.send_message(
-                    user_id,
-                    f"⏰ یادآوری رویداد!\n\n📌 «{ad_title}»\n🕒 {display}\n\nنیم ساعت دیگر این جلسه آغاز می‌شود."
-                )
-                cursor.execute("UPDATE reminders SET sent = 1 WHERE id = ?", (reminder_id,))
-                conn.commit()
+                text = f"⏰ یادآوری رویداد!\n\n📌 «{ad_title}»\n🕒 {display}\n\nنیم ساعت دیگر این جلسه آغاز می‌شود."
+
+                markup = InlineKeyboardMarkup()
+                markup.add(InlineKeyboardButton(text="✅ دریافت شد (افزایش ظرفیت)", callback_data=f"gotit|{reminder_id}"), row=1)
+
+                sent = await send_quota_message(user_id, text, components=markup)
+                if sent:
+                    cursor.execute("UPDATE reminders SET sent = 1 WHERE id = ?", (reminder_id,))
+                    conn.commit()
+                else:
+                    new_attempt = attempt_count + 1
+                    if new_attempt >= MAX_REMINDER_ATTEMPTS:
+                        cursor.execute("UPDATE reminders SET sent = 1 WHERE id = ?", (reminder_id,))
+                        print(f"reminder {reminder_id} gave up after {new_attempt} attempts (quota exhausted)", flush=True)
+                    else:
+                        cursor.execute("UPDATE reminders SET attempt_count = ? WHERE id = ?", (new_attempt, reminder_id))
+                    conn.commit()
             except Exception as e:
                 print(f"خطا در ارسال یادآوری به {user_id}: {e}")
 
@@ -1027,6 +1052,7 @@ async def send_profile(message: Message):
     active_count = cursor.fetchone()[0]
     conn.close()
 
+    quota = await get_quota(user.id)
     username_display = f"@{user.username}" if user.username else "ندارد"
     text = (
         f"👤 پروفایل شما\n\n"
@@ -1034,6 +1060,7 @@ async def send_profile(message: Message):
         f"نام کاربری: {username_display}\n"
         f"نام: {user.first_name}\n\n"
         f"🔔 تعداد یادآوری‌های فعال: {active_count}"
+        f"🔋 ظرفیت دریافت پیام: {quota}"
     )
     await message.reply(text)
 
@@ -1257,7 +1284,7 @@ async def approve_pending_event(pending_id: int):
     conn.close()
 
     await post_ad_to_channel(ad_id)
-    await client.send_message(submitted_by, f"✅ رویداد پیشنهادی شما «{title}» تایید و در کانال منتشر شد.")
+    await send_quota_message(submitted_by, f"✅ رویداد پیشنهادی شما «{title}» تایید و در کانال منتشر شد.")
     return ad_id
 
 
@@ -1277,7 +1304,7 @@ async def reject_pending_event(pending_id: int, reason: str):
     conn.close()
 
     reason_text = f"\nدلیل: {reason}" if reason and reason != "/skip" else ""
-    await client.send_message(submitted_by, f"❌ رویداد پیشنهادی شما «{title}» رد شد.{reason_text}")
+    await send_quota_message(submitted_by, f"❌ رویداد پیشنهادی شما «{title}» رد شد.{reason_text}")
 
 
 async def notify_admins(text: str):
@@ -1375,7 +1402,61 @@ async def upsert_user(user):
     )
     conn.commit()
     conn.close()
+    
+async def get_quota(user_id: int) -> int:
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT quota FROM users WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    if row is None:
+        cursor.execute(
+            "INSERT INTO users (user_id, quota) VALUES (?, ?)",
+            (user_id, DEFAULT_QUOTA)
+        )
+        conn.commit()
+        conn.close()
+        return DEFAULT_QUOTA
+    conn.close()
+    return row[0]
 
+
+async def increment_quota(user_id: int, amount: int = 1) -> int:
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO users (user_id, quota) VALUES (?, ?) "
+        "ON CONFLICT(user_id) DO UPDATE SET quota = quota + ?",
+        (user_id, DEFAULT_QUOTA + amount, amount)
+    )
+    conn.commit()
+    cursor.execute("SELECT quota FROM users WHERE user_id = ?", (user_id,))
+    new_quota = cursor.fetchone()[0]
+    conn.close()
+    return new_quota
+
+
+async def decrement_quota(user_id: int, amount: int = 1) -> None:
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET quota = quota - ? WHERE user_id = ?", (amount, user_id))
+    conn.commit()
+    conn.close()
+
+
+async def send_quota_message(user_id: int, text: str, components=None) -> bool:
+    """پیام رو فقط در صورتی می‌فرسته که ظرفیت کاربر بیشتر از صفر باشه. خروجی: آیا ارسال شد یا نه."""
+    quota = await get_quota(user_id)
+    if quota <= 0:
+        print(f"quota exhausted, skipped sending to {user_id}", flush=True)
+        return False
+    try:
+        await client.send_message(user_id, text, components=components)
+        await decrement_quota(user_id)
+        return True
+    except Exception as e:
+        print(f"error sending quota message to {user_id}: {e}", flush=True)
+        return False
+    
 async def send_stats(admin_user_id: int):
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conn = get_db()
