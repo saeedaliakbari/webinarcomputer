@@ -231,7 +231,7 @@ async def on_message(message: Message):
         return
     if content == BTN_INCREASE_QUOTA:
         new_quota = await increment_quota(user_id, 1)
-        await message.reply(f"✅ ظرفیت دریافت پیام شما ۱ واحد افزایش یافت.\nظرفیت فعلی: {new_quota}")
+        # await message.reply(f"✅ ظرفیت دریافت پیام شما ۱ واحد افزایش یافت.\nظرفیت فعلی: {new_quota}")
         return
     # ---- از اینجا فقط ادمین ----
     if user_id not in ADMIN_IDS:
@@ -716,7 +716,7 @@ async def on_callback(callback_query):
     
     if data.startswith("gotit|"):
         new_quota = await increment_quota(user_id, 1)
-        await client.send_message(user_id, f"👍 ثبت شد. ظرفیت فعلی شما: {new_quota}")
+        # await client.send_message(user_id, f"👍 ثبت شد. ظرفیت فعلی شما: {new_quota}")
         return
 
     if data == "cancelallrem":
