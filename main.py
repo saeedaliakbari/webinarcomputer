@@ -27,6 +27,7 @@ IRAN_UTC_OFFSET = timedelta(hours=3, minutes=30)
 DEFAULT_QUOTA = 10
 BTN_INCREASE_QUOTA = "🔋 افزایش ظرفیت دریافت"
 MAX_REMINDER_ATTEMPTS = 10
+MAX_MESSAGE_LENGTH = 3900  # کمی زیر سقف واقعی بله برای اطمینان
 
 admin_states = {}
 
@@ -600,18 +601,35 @@ async def post_ad_to_channel(ad_id: int):
         row_num += 1
 
     sessions_text = "\n".join(session_lines)
-    text = f"📢 {title}\n\n{description}\n\n🕒 جلسات:\n{sessions_text}"
+
+    # ساخت متن با کوتاه‌سازی خودکار توضیحات در صورت طولانی بودن
+    header = f"📢 {title}\n\n"
+    footer = f"\n\n🕒 جلسات:\n{sessions_text}"
+    max_description_len = MAX_MESSAGE_LENGTH - len(header) - len(footer) - 20  # حاشیه اطمینان
+
+    safe_description = description
+    if len(safe_description) > max_description_len:
+        safe_description = safe_description[:max_description_len].rstrip() + "…"
+
+    text = f"{header}{safe_description}{footer}"
 
     photo_message_id = None
 
     if photo_file_id:
-        # عکس همیشه بدون caption فرستاده میشه تا هیچوقت به محدودیت طول caption نخوریم
         photo = InputFile(photo_file_id)
         photo_message = await client.send_photo(CHANNEL_ID, photo)
         photo_message_id = photo_message.message_id
 
-    # متن کامل + دکمه‌ها همیشه به‌عنوان یک پیام جدا (بدون محدودیت طول caption)
-    sent_message = await client.send_message(CHANNEL_ID, text, components=markup)
+    try:
+        sent_message = await client.send_message(CHANNEL_ID, text, components=markup)
+    except Exception as e:
+        # اگه متن هم fail شد، عکس تازه‌فرستاده‌شده رو پاک کن تا orphan نمونه
+        if photo_message_id:
+            try:
+                await client.delete_message(CHANNEL_ID, photo_message_id)
+            except Exception as del_err:
+                print(f"خطا در حذف عکس یتیم بعد از fail شدن متن: {del_err}", flush=True)
+        raise e
 
     conn = get_db()
     cursor = conn.cursor()
