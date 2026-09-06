@@ -158,45 +158,12 @@ async def republish_ad(ad_id: int):
 async def main():
     async with client:
         await client.get_me()
-
-        conn = get_db()
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, title, description FROM ads")
-        ads = cursor.fetchall()
-
-        print(f"بررسی {len(ads)} آگهی...\n")
-
-        long_ads = []
-        for ad_id, title, description in ads:
-            cursor.execute("SELECT COUNT(*) FROM ad_sessions WHERE ad_id = ?", (ad_id,))
-            session_count = cursor.fetchone()[0]
-            length = calculate_message_length(title, description, session_count)
-            if length > MAX_MESSAGE_LENGTH:
-                long_ads.append((ad_id, title, length))
-                print(f"⚠️  آگهی #{ad_id} «{title}» — طول تخمینی: {length} (بیش از حد مجاز)")
-
-        conn.close()
-
-        if not long_ads:
-            print("هیچ آگهی طولانی‌ای پیدا نشد. نیازی به اصلاح نیست.")
-            return
-
-        print(f"\n{len(long_ads)} آگهی طولانی پیدا شد. شروع اصلاح خودکار...\n")
-
-        fixed, failed = [], []
-        for ad_id, title, length in long_ads:
+        for ad_id in [13, 15]:
             try:
                 await republish_ad(ad_id)
-                fixed.append((ad_id, title))
-                print(f"✅ آگهی #{ad_id} «{title}» با موفقیت اصلاح شد.")
+                print(f"✅ آگهی #{ad_id} با موفقیت اصلاح شد.")
             except Exception as e:
-                failed.append((ad_id, title, str(e)))
-                print(f"❌ آگهی #{ad_id} «{title}» ناموفق: {e}")
+                print(f"❌ آگهی #{ad_id} ناموفق: {e}")
             await asyncio.sleep(2)
-
-        print(f"\n--- خلاصه ---")
-        print(f"اصلاح‌شده: {len(fixed)}")
-        print(f"ناموفق: {len(failed)}")
-
 
 asyncio.run(main())
