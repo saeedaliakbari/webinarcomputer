@@ -27,12 +27,23 @@ from datetime import timedelta
 
 IRAN_UTC_OFFSET = timedelta(hours=3, minutes=30)
 
-def build_google_calendar_link(title, description, start_dt, duration_minutes=60):
+CALENDAR_DESCRIPTION_MAX_LEN = 150
+
+def build_google_calendar_link(title: str, description: str, start_dt: datetime, duration_minutes: int = 60) -> str:
+    short_description = description[:CALENDAR_DESCRIPTION_MAX_LEN]
+    if len(description) > CALENDAR_DESCRIPTION_MAX_LEN:
+        short_description = short_description.rstrip() + "…"
+
     start_utc = start_dt - IRAN_UTC_OFFSET
     end_utc = start_utc + timedelta(minutes=duration_minutes)
     start_str = start_utc.strftime("%Y%m%dT%H%M%SZ")
     end_str = end_utc.strftime("%Y%m%dT%H%M%SZ")
-    params = {"action": "TEMPLATE", "text": title, "dates": f"{start_str}/{end_str}", "details": description}
+    params = {
+        "action": "TEMPLATE",
+        "text": title,
+        "dates": f"{start_str}/{end_str}",
+        "details": short_description,
+    }
     query = "&".join(f"{k}={quote(str(v))}" for k, v in params.items())
     return f"https://calendar.google.com/calendar/render?{query}"
 

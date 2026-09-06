@@ -28,6 +28,7 @@ DEFAULT_QUOTA = 10
 BTN_INCREASE_QUOTA = "🔋 افزایش ظرفیت دریافت"
 MAX_REMINDER_ATTEMPTS = 10
 MAX_MESSAGE_LENGTH = 3900  # کمی زیر سقف واقعی بله برای اطمینان
+CALENDAR_DESCRIPTION_MAX_LEN = 150
 
 admin_states = {}
 
@@ -136,6 +137,10 @@ def format_remaining(event_time: datetime) -> str:
 
 
 def build_google_calendar_link(title: str, description: str, start_dt: datetime, duration_minutes: int = 60) -> str:
+    short_description = description[:CALENDAR_DESCRIPTION_MAX_LEN]
+    if len(description) > CALENDAR_DESCRIPTION_MAX_LEN:
+        short_description = short_description.rstrip() + "…"
+
     start_utc = start_dt - IRAN_UTC_OFFSET
     end_utc = start_utc + timedelta(minutes=duration_minutes)
     start_str = start_utc.strftime("%Y%m%dT%H%M%SZ")
@@ -144,7 +149,7 @@ def build_google_calendar_link(title: str, description: str, start_dt: datetime,
         "action": "TEMPLATE",
         "text": title,
         "dates": f"{start_str}/{end_str}",
-        "details": description,
+        "details": short_description,
     }
     query = "&".join(f"{k}={quote(str(v))}" for k, v in params.items())
     return f"https://calendar.google.com/calendar/render?{query}"
