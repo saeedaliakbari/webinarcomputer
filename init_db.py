@@ -14,6 +14,7 @@ CREATE TABLE ads (
     description TEXT NOT NULL,
     photo_file_id TEXT,
     channel_message_id TEXT,
+    hannel_photo_message_id TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 )
 """)

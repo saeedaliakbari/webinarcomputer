@@ -1,13 +1,6 @@
 import sqlite3
 conn = sqlite3.connect('db/bot_database.db')
-conn.execute('ALTER TABLE users ADD COLUMN quota INTEGER DEFAULT 10')
+conn.execute('ALTER TABLE ads ADD COLUMN channel_photo_message_id TEXT')
 conn.commit()
 conn.close()
-print('ستون quota اضافه شد')
-
-import sqlite3
-conn = sqlite3.connect('db/bot_database.db')
-conn.execute('ALTER TABLE reminders ADD COLUMN attempt_count INTEGER DEFAULT 0')
-conn.commit()
-conn.close()
-print('ستون attempt_count اضافه شد')
+print('ستون اضافه شد')

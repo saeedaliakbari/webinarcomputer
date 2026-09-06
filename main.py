@@ -572,8 +572,8 @@ async def post_ad_to_channel(ad_id: int):
         markup.add(InlineKeyboardButton(
             text="🔔 یادآوری همه جلسات",
             url=f"https://ble.ir/{BOT_USERNAME}?start=remind_all_{ad_id}"
-        ),row=row_num)
-        row_num+=1
+        ), row=row_num)
+        row_num += 1
 
     numerals = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
     for idx, (session_id, session_time, video_link) in enumerate(sessions):
@@ -593,7 +593,6 @@ async def post_ad_to_channel(ad_id: int):
             markup.add(InlineKeyboardButton(text=video_label, url=video_link), row=row_num)
             row_num += 1
 
-        # ---- دکمه‌ی جدید: افزودن به تقویم گوگل ----
         session_dt = datetime.strptime(session_time, "%Y-%m-%d %H:%M:%S")
         calendar_link = build_google_calendar_link(title, description, session_dt)
         calendar_label = f"📅 افزودن جلسه {idx+1} به تقویم" if len(sessions) > 1 else "📅 افزودن به تقویم گوگل"
@@ -603,14 +602,23 @@ async def post_ad_to_channel(ad_id: int):
     sessions_text = "\n".join(session_lines)
     text = f"📢 {title}\n\n{description}\n\n🕒 جلسات:\n{sessions_text}"
 
+    photo_message_id = None
+
     if photo_file_id:
+        # عکس همیشه بدون caption فرستاده میشه تا هیچوقت به محدودیت طول caption نخوریم
         photo = InputFile(photo_file_id)
-        sent_message = await client.send_photo(CHANNEL_ID, photo, caption=text, components=markup)
-    else:
-        sent_message = await client.send_message(CHANNEL_ID, text, components=markup)
+        photo_message = await client.send_photo(CHANNEL_ID, photo)
+        photo_message_id = photo_message.message_id
+
+    # متن کامل + دکمه‌ها همیشه به‌عنوان یک پیام جدا (بدون محدودیت طول caption)
+    sent_message = await client.send_message(CHANNEL_ID, text, components=markup)
+
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute("UPDATE ads SET channel_message_id = ? WHERE id = ?", (sent_message.message_id, ad_id))
+    cursor.execute(
+        "UPDATE ads SET channel_message_id = ?, channel_photo_message_id = ? WHERE id = ?",
+        (sent_message.message_id, photo_message_id, ad_id)
+    )
     conn.commit()
     conn.close()
 
@@ -618,18 +626,31 @@ async def post_ad_to_channel(ad_id: int):
 async def republish_ad_after_edit(ad_id: int):
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT channel_message_id FROM ads WHERE id = ?", (ad_id,))
+    cursor.execute("SELECT channel_message_id, channel_photo_message_id FROM ads WHERE id = ?", (ad_id,))
     row = cursor.fetchone()
     conn.close()
 
-    if row and row[0]:
+    old_text_message_id = row[0] if row else None
+    old_photo_message_id = row[1] if row else None
+
+    try:
+        await post_ad_to_channel(ad_id)  # اول پیام جدید (چه موفق چه ناموفق، مشخص میشه قبل از حذف قدیمی)
+    except Exception as e:
+        print(f"CRITICAL: republish failed for ad {ad_id}: {e}", flush=True)
+        await notify_admins(f"⚠️ خطا در بازانتشار آگهی {ad_id}: {e}\nپیام‌های قدیمی کانال دست‌نخورده باقی ماندند.")
+        return
+
+    # فقط اگه پیام جدید موفق فرستاده شد، پیام‌های قدیمی رو پاک کن
+    if old_text_message_id:
         try:
-            await client.delete_message(CHANNEL_ID, row[0])
+            await client.delete_message(CHANNEL_ID, old_text_message_id)
         except Exception as e:
-            print(f"خطا در حذف پیام قدیمی کانال: {e}")
-
-    await post_ad_to_channel(ad_id)
-
+            print(f"خطا در حذف پیام متن قدیمی کانال: {e}")
+    if old_photo_message_id:
+        try:
+            await client.delete_message(CHANNEL_ID, old_photo_message_id)
+        except Exception as e:
+            print(f"خطا در حذف پیام عکس قدیمی کانال: {e}")
 
 async def update_ad_field(ad_id: int, field: str, value):
     conn = get_db()
@@ -798,13 +819,19 @@ async def on_callback(callback_query):
         ad_id = int(data.split("|")[1])
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute("SELECT channel_message_id FROM ads WHERE id = ?", (ad_id,))
+        cursor.execute("SELECT channel_message_id, channel_photo_message_id FROM ads WHERE id = ?", (ad_id,))
         row = cursor.fetchone()
-        if row and row[0]:
-            try:
-                await client.delete_message(CHANNEL_ID, row[0])
-            except Exception as e:
-                print(f"خطا در حذف پیام کانال: {e}")
+        if row:
+            if row[0]:
+                try:
+                    await client.delete_message(CHANNEL_ID, row[0])
+                except Exception as e:
+                    print(f"خطا در حذف پیام کانال: {e}")
+            if row[1]:
+                try:
+                    await client.delete_message(CHANNEL_ID, row[1])
+                except Exception as e:
+                    print(f"خطا در حذف پیام عکس کانال: {e}")
 
         cursor.execute("SELECT id FROM ad_sessions WHERE ad_id = ?", (ad_id,))
         session_ids = [r[0] for r in cursor.fetchall()]
